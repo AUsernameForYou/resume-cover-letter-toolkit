@@ -1,0 +1,11 @@
+{
+  "name": "Jordan Example",
+  "email": "jordan@example.invalid",
+  "phone": "",
+  "location": "Example City",
+  "links": {
+    "Portfolio": "https://example.invalid/portfolio"
+  },
+  "font": "Georgia",
+  "motivation": "I am interested in helping infrastructure teams make practical improvements supported by reliable evidence."
+}

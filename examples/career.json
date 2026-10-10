@@ -1,0 +1,385 @@
+{
+  "sources": [
+    {
+      "id": "src_profile",
+      "title": "Fictional demonstration profile",
+      "kind": "resume",
+      "source_date": "2026-01-15",
+      "retrieved_at": "2026-01-15",
+      "uri": "https://example.invalid/profile",
+      "notes": "Fictional data, not a real candidate."
+    },
+    {
+      "id": "src_posting",
+      "title": "Fictional infrastructure delivery posting",
+      "kind": "job_posting",
+      "source_date": "2026-01-15",
+      "retrieved_at": "2026-01-15",
+      "uri": "https://example.invalid/jobs/delivery",
+      "notes": "Fictional job for the offline example."
+    }
+  ],
+  "organizations": [
+    {
+      "id": "org_work",
+      "name": "Example Grid Works",
+      "kind": "employer",
+      "source_ids": [
+        "src_profile"
+      ],
+      "description": "Fictional employer."
+    },
+    {
+      "id": "org_target",
+      "name": "Example Infrastructure Company",
+      "kind": "target_employer",
+      "source_ids": [
+        "src_posting"
+      ],
+      "description": "Fictional hiring company."
+    }
+  ],
+  "roles": [
+    {
+      "id": "role_ops",
+      "organization_id": "org_work",
+      "title": "Construction Coordinator",
+      "start_date": "2019",
+      "end_date": "2025",
+      "as_of": "2026-01-15",
+      "source_ids": [
+        "src_profile"
+      ]
+    },
+    {
+      "id": "role_products",
+      "organization_id": "org_work",
+      "title": "Product Developer",
+      "start_date": "2025",
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "source_ids": [
+        "src_profile"
+      ]
+    }
+  ],
+  "projects": [],
+  "facts": [
+    {
+      "id": "fact_coordination",
+      "organization_id": "org_work",
+      "role_id": "role_ops",
+      "project_id": null,
+      "kind": "achievement",
+      "claim": "Led two project coordinators through three distribution upgrades.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "personal",
+      "completion_status": "completed",
+      "verification_status": "documented",
+      "application_eligible": true,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    },
+    {
+      "id": "fact_cost",
+      "organization_id": "org_work",
+      "role_id": "role_ops",
+      "project_id": null,
+      "kind": "achievement",
+      "claim": "Helped negotiate approximately $25,000 in contract credits.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "personal",
+      "completion_status": "completed",
+      "verification_status": "documented",
+      "application_eligible": true,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [
+        {
+          "label": "Contract credits",
+          "value": 25000,
+          "unit": "dollars",
+          "currency": "USD",
+          "scope": "project",
+          "qualifier": "Approximately; shared contribution"
+        }
+      ],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    },
+    {
+      "id": "fact_process",
+      "organization_id": "org_work",
+      "role_id": "role_ops",
+      "project_id": null,
+      "kind": "achievement",
+      "claim": "Created a repeatable inspection and issue-tracking workflow.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "personal",
+      "completion_status": "completed",
+      "verification_status": "documented",
+      "application_eligible": true,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    },
+    {
+      "id": "fact_software",
+      "organization_id": "org_work",
+      "role_id": "role_products",
+      "project_id": null,
+      "kind": "achievement",
+      "claim": "Developed a local Python and SQLite research tool.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "personal",
+      "completion_status": "completed",
+      "verification_status": "documented",
+      "application_eligible": true,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    },
+    {
+      "id": "fact_education",
+      "organization_id": "org_work",
+      "role_id": null,
+      "project_id": null,
+      "kind": "education",
+      "claim": "Earned a Master of Science in Environmental Engineering from Example State University.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "personal",
+      "completion_status": "completed",
+      "verification_status": "documented",
+      "application_eligible": true,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    },
+    {
+      "id": "fact_future",
+      "organization_id": "org_work",
+      "role_id": "role_ops",
+      "project_id": null,
+      "kind": "achievement",
+      "claim": "Planned a new reporting dashboard.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "personal",
+      "completion_status": "planned",
+      "verification_status": "documented",
+      "application_eligible": false,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    },
+    {
+      "id": "fact_context",
+      "organization_id": "org_work",
+      "role_id": null,
+      "project_id": null,
+      "kind": "company_context",
+      "claim": "The fictional employer manages a regional distribution network.",
+      "start_date": null,
+      "end_date": null,
+      "as_of": "2026-01-15",
+      "scope": "organization",
+      "completion_status": "completed",
+      "verification_status": "documented",
+      "application_eligible": false,
+      "tags": [
+        "operations",
+        "engineering"
+      ],
+      "metrics": [],
+      "evidence": [
+        {
+          "source_id": "src_profile",
+          "locator": "Fictional demonstration profile"
+        }
+      ],
+      "usage_notes": "Fictional example. Replace with your own sourced work."
+    }
+  ],
+  "questions": [
+    {
+      "id": "question_reporting",
+      "priority": "medium",
+      "question": "Did the planned dashboard launch?",
+      "reason": "A plan is not a delivered result.",
+      "related_fact_ids": [
+        "fact_future"
+      ],
+      "status": "open"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "example-job",
+      "organization_id": "org_target",
+      "title": "Infrastructure Delivery Lead",
+      "url": "https://example.invalid/jobs/delivery",
+      "captured_at": "2026-01-15",
+      "source_id": "src_posting",
+      "status": "captured",
+      "notes": "Coordinate construction teams, review supplier costs, improve auditable workflows and communicate technical decisions."
+    }
+  ],
+  "requirements": [
+    {
+      "id": "requirement_1",
+      "job_id": "example-job",
+      "category": "required",
+      "text": "Coordinate construction teams",
+      "tags": [
+        "operations"
+      ],
+      "source_locator": "Fictional posting requirement 1"
+    },
+    {
+      "id": "requirement_2",
+      "job_id": "example-job",
+      "category": "required",
+      "text": "Exercise commercial judgment",
+      "tags": [
+        "operations"
+      ],
+      "source_locator": "Fictional posting requirement 2"
+    },
+    {
+      "id": "requirement_3",
+      "job_id": "example-job",
+      "category": "required",
+      "text": "Improve auditable workflows",
+      "tags": [
+        "operations"
+      ],
+      "source_locator": "Fictional posting requirement 3"
+    },
+    {
+      "id": "requirement_4",
+      "job_id": "example-job",
+      "category": "required",
+      "text": "Use technical and data tools",
+      "tags": [
+        "operations"
+      ],
+      "source_locator": "Fictional posting requirement 4"
+    },
+    {
+      "id": "requirement_reporting",
+      "job_id": "example-job",
+      "category": "preferred",
+      "text": "Own a formal environmental reporting program",
+      "tags": [
+        "reporting"
+      ],
+      "source_locator": "Fictional preferred skill"
+    }
+  ],
+  "matches": [
+    {
+      "id": "match_1",
+      "requirement_id": "requirement_1",
+      "fact_id": "fact_coordination",
+      "assessment": "direct",
+      "rationale": "Explicit fictional example mapping, not an automated qualification inference.",
+      "review_status": "curated"
+    },
+    {
+      "id": "match_2",
+      "requirement_id": "requirement_2",
+      "fact_id": "fact_cost",
+      "assessment": "direct",
+      "rationale": "Explicit fictional example mapping, not an automated qualification inference.",
+      "review_status": "curated"
+    },
+    {
+      "id": "match_3",
+      "requirement_id": "requirement_3",
+      "fact_id": "fact_process",
+      "assessment": "direct",
+      "rationale": "Explicit fictional example mapping, not an automated qualification inference.",
+      "review_status": "curated"
+    },
+    {
+      "id": "match_4",
+      "requirement_id": "requirement_4",
+      "fact_id": "fact_software",
+      "assessment": "adjacent",
+      "rationale": "Explicit fictional example mapping, not an automated qualification inference.",
+      "review_status": "curated"
+    },
+    {
+      "id": "match_reporting",
+      "requirement_id": "requirement_reporting",
+      "fact_id": null,
+      "assessment": "gap",
+      "rationale": "No documented program ownership in this fictional profile; education supports capability but is not the same past outcome.",
+      "review_status": "curated"
+    }
+  ]
+}

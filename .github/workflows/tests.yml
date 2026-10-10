@@ -1,0 +1,52 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: |
+          python - <<'PY'
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover('tests')
+          discovered = suite.countTestCases()
+          print(f'Discovered {discovered} core tests', flush=True)
+          if discovered == 0:
+              sys.exit('No core tests discovered')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          executed = result.testsRun - len(result.skipped)
+          print(f'Executed {executed} core tests; skipped {len(result.skipped)}', flush=True)
+          sys.exit(0 if result.wasSuccessful() and executed > 0 else 1)
+          PY
+      - run: python scripts/check_privacy.py
+  documents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-documents.txt
+      - run: |
+          python - <<'PY'
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover('tests_documents')
+          discovered = suite.countTestCases()
+          print(f'Discovered {discovered} document tests', flush=True)
+          if discovered == 0:
+              sys.exit('No document tests discovered')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          executed = result.testsRun - len(result.skipped)
+          print(f'Executed {executed} document tests; skipped {len(result.skipped)}', flush=True)
+          sys.exit(0 if result.wasSuccessful() and executed > 0 else 1)
+          PY
