@@ -2,6 +2,7 @@
 """Prepare a private evidence store and matching resumes and cover letters."""
 from __future__ import annotations
 import argparse
+import contextlib
 import datetime as dt
 from pathlib import Path
 import json
@@ -19,7 +20,7 @@ PROJECT=Path(__file__).resolve().parent
 
 def require_fts5():
     try:
-        with sqlite3.connect(':memory:') as check:
+        with contextlib.closing(sqlite3.connect(':memory:')) as check:
             check.execute('CREATE VIRTUAL TABLE toolkit_capability USING fts5(text)')
     except sqlite3.Error as exc:
         raise career.ValidationError('SQLite FTS5 is required. Use a Python 3.10 or newer installation with FTS5 support, then retry init. No workspace files were created.') from exc

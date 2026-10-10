@@ -101,14 +101,14 @@ class ToolkitTests(unittest.TestCase):
 
     def test_foreign_history_database_is_not_modified(self):
         db=self.root/'state/application_history.sqlite'
-        with sqlite3.connect(db) as conn:conn.execute('CREATE TABLE unrelated(value TEXT)');conn.commit()
+        with contextlib.closing(sqlite3.connect(db)) as conn:conn.execute('CREATE TABLE unrelated(value TEXT)');conn.commit()
         before=db.read_bytes()
         with self.assertRaisesRegex(career.ValidationError,'another application'):documents.history(self.root,'applied','x')
         self.assertEqual(before,db.read_bytes())
 
     def test_foreign_history_prevents_artifact_publication(self):
         db=self.root/'state/application_history.sqlite'
-        with sqlite3.connect(db) as conn:conn.execute('CREATE TABLE unrelated(value TEXT)');conn.commit()
+        with contextlib.closing(sqlite3.connect(db)) as conn:conn.execute('CREATE TABLE unrelated(value TEXT)');conn.commit()
         path=self.draft()
         with self.assertRaisesRegex(career.ValidationError,'another application'):documents.render(self.root,path)
         self.assertEqual(list((path.parent.parent/'documents').glob('*')) if (path.parent.parent/'documents').exists() else [],[])
@@ -165,10 +165,10 @@ class ToolkitTests(unittest.TestCase):
     def test_cached_package_refuses_foreign_or_mismatched_history(self):
         path=self.draft();result=documents.render(self.root,path)
         ledger=self.root/'state/application_history.sqlite'
-        with sqlite3.connect(ledger) as db:db.execute("UPDATE versions SET job_id='wrong'");db.commit()
+        with contextlib.closing(sqlite3.connect(ledger)) as db:db.execute("UPDATE versions SET job_id='wrong'");db.commit()
         with self.assertRaisesRegex(career.ValidationError,'disagrees'):documents.render(self.root,path)
         ledger.unlink()
-        with sqlite3.connect(ledger) as db:db.execute('CREATE TABLE unrelated(value TEXT)');db.commit()
+        with contextlib.closing(sqlite3.connect(ledger)) as db:db.execute('CREATE TABLE unrelated(value TEXT)');db.commit()
         before=ledger.read_bytes();manifest=Path(result['directory'])/'manifest.json';original=manifest.read_bytes()
         documents.approve(self.root,path)
         with self.assertRaisesRegex(career.ValidationError,'another application'):documents.render(self.root,path,final=True)
@@ -325,11 +325,11 @@ class ToolkitTests(unittest.TestCase):
 
     def test_history_version_and_table_contract_are_checked_without_mutation(self):
         documents.render(self.root,self.draft());path=self.root/'state/application_history.sqlite'
-        with sqlite3.connect(path) as db:db.execute('PRAGMA user_version=99');db.commit()
+        with contextlib.closing(sqlite3.connect(path)) as db:db.execute('PRAGMA user_version=99');db.commit()
         before=path.read_bytes()
         with self.assertRaisesRegex(career.ValidationError,'schema version'):documents.history(self.root)
         self.assertEqual(before,path.read_bytes())
-        with sqlite3.connect(path) as db:db.execute('PRAGMA user_version=1');db.execute('ALTER TABLE versions ADD COLUMN unknown TEXT');db.commit()
+        with contextlib.closing(sqlite3.connect(path)) as db:db.execute('PRAGMA user_version=1');db.execute('ALTER TABLE versions ADD COLUMN unknown TEXT');db.commit()
         before=path.read_bytes()
         with self.assertRaisesRegex(career.ValidationError,'table contract'):documents.history(self.root)
         self.assertEqual(before,path.read_bytes())
@@ -395,7 +395,7 @@ class AuditRegressionTests(unittest.TestCase):
         file=self.root/'data/base.json';pack=json.loads(file.read_text())
         held=copy.deepcopy(pack['facts'][0]);held['id']='fact_held';held['application_eligible']=False
         pack['facts'].append(held);file.write_text(json.dumps(pack));career.build(self.root)
-        with sqlite3.connect(self.root/'build/career.sqlite') as db:
+        with contextlib.closing(sqlite3.connect(self.root/'build/career.sqlite')) as db:
             db.execute("UPDATE facts SET application_eligible=1 WHERE id='fact_held'");db.commit()
         with self.assertRaisesRegex(career.ValidationError,'rows differ'):
             with career.open_database(self.root):pass

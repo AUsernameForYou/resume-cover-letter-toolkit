@@ -303,9 +303,10 @@ class CareerSafetyTests(unittest.TestCase):
 
     def test_sql_constraints_reject_direct_eligibility_override(self):
         career.build(self.root)
-        with sqlite3.connect(self.root / "build" / "career.sqlite") as db:
-            with self.assertRaises(sqlite3.IntegrityError):
-                db.execute("UPDATE facts SET application_eligible=1 WHERE id='f_company'")
+        with contextlib.closing(sqlite3.connect(self.root / "build" / "career.sqlite")) as db:
+            with db:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute("UPDATE facts SET application_eligible=1 WHERE id='f_company'")
 
     def test_match_validation_and_build_agree_on_gap_fact_references(self):
         career.build(self.root)
@@ -345,8 +346,9 @@ class CareerSafetyTests(unittest.TestCase):
         path = self.root / "build/career.sqlite"
         for application_id in [0, 12345]:
             with self.subTest(application_id=application_id):
-                with sqlite3.connect(path) as db:
-                    db.execute(f"PRAGMA application_id={application_id}")
+                with contextlib.closing(sqlite3.connect(path)) as db:
+                    with db:
+                        db.execute(f"PRAGMA application_id={application_id}")
                 before = path.read_bytes()
                 with self.assertRaisesRegex(career.ValidationError, "belongs to another application"):
                     with career.open_database(self.root):
