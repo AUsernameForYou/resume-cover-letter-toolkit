@@ -94,11 +94,39 @@ class CareerSafetyTests(unittest.TestCase):
             metric = db.execute("SELECT value,scope FROM fact_metrics WHERE fact_id='f_metric'").fetchone()
             self.assertEqual(tuple(metric), (2000000000, "project"))
             career.export_data(self.root, db)
-        rendered = (self.root / "exports" / "career_inventory.md").read_text()
+        rendered = (self.root / "exports" / "career_inventory.md").read_text(encoding="utf-8")
         self.assertIn("metric scope: project", rendered)
         self.assertIn("2,000,000,000", rendered)
         self.assertIn("Example Works", rendered)
         self.assertIn("as of 2025-03-01", rendered)
+
+    def test_build_sync_uses_writable_descriptor_without_weakening_durability(self):
+        career.build(self.root)
+        self.fact()["claim"] = "Released an updated sourced workflow."
+        self.write_pack()
+        original_open = Path.open
+        original_fsync = career.os.fsync
+        handles = {}
+        synced = []
+        def track_database_open(path, *args, **kwargs):
+            handle = original_open(path, *args, **kwargs)
+            if path.name.startswith(".career-") and path.suffix == ".sqlite":
+                handles[handle.fileno()] = handle
+            return handle
+        def require_writable_sync(fd):
+            handle = handles.get(fd)
+            if handle is not None:
+                if not handle.writable():
+                    raise OSError(errno.EBADF, "Windows commit requires a writable descriptor")
+                synced.append(fd)
+            return original_fsync(fd)
+        with mock.patch.object(Path, "open", track_database_open):
+            with mock.patch.object(career.os, "fsync", side_effect=require_writable_sync):
+                career.build(self.root)
+        self.assertEqual(len(synced), 1)
+        with career.open_database(self.root) as db:
+            self.assertEqual(db.execute("SELECT claim FROM facts WHERE id='f_ready'").fetchone()[0], self.fact()["claim"])
+        self.assertEqual(list((self.root / "build").glob(".career-*")), [])
 
     def test_invalid_input_cannot_replace_existing_database(self):
         career.build(self.root)
@@ -150,7 +178,7 @@ class CareerSafetyTests(unittest.TestCase):
         career.build(self.root)
         database = self.root / "build" / "career.sqlite"
         before = database.read_bytes()
-        (self.root / "schema.sql").write_text((PROJECT / "schema.sql").read_text() + "\n-- schema revision\n")
+        (self.root / "schema.sql").write_text((PROJECT / "schema.sql").read_text(encoding="utf-8") + "\n-- schema revision\n", encoding="utf-8")
         with mock.patch.object(career, "ROOT", self.root):
             with self.assertRaisesRegex(career.ValidationError, "Database is stale.*schema.*run build"):
                 with career.open_database(self.root):
@@ -191,10 +219,10 @@ class CareerSafetyTests(unittest.TestCase):
             career.load_data(self.root)
 
     def test_duplicate_ids_and_duplicate_json_keys_are_rejected(self):
-        (self.root / "data" / "duplicate.json").write_text(json.dumps({"facts": [self.fact()]}))
+        (self.root / "data" / "duplicate.json").write_text(json.dumps({"facts": [self.fact()]}), encoding="utf-8")
         with self.assertRaisesRegex(career.ValidationError, "duplicate facts ID"):
             career.load_data(self.root)
-        (self.root / "data" / "duplicate.json").write_text('{"facts": [], "facts": []}')
+        (self.root / "data" / "duplicate.json").write_text('{"facts": [], "facts": []}', encoding="utf-8")
         with self.assertRaisesRegex(career.ValidationError, "Duplicate JSON key"):
             career.load_data(self.root)
 
@@ -245,14 +273,14 @@ class CareerSafetyTests(unittest.TestCase):
 
     def test_intake_is_validated_and_never_overwrites(self):
         incoming = self.root / "incoming.json"
-        incoming.write_text(json.dumps({"facts": [self.fact()]}))
+        incoming.write_text(json.dumps({"facts": [self.fact()]}), encoding="utf-8")
         before = set((self.root / "data").iterdir())
         with self.assertRaisesRegex(career.ValidationError, "duplicate facts ID"):
             career.add_pack(self.root, incoming)
         self.assertEqual(before, set((self.root / "data").iterdir()))
         new_fact = copy.deepcopy(self.fact())
         new_fact["id"] = "f_incoming"
-        incoming.write_text(json.dumps({"facts": [new_fact]}))
+        incoming.write_text(json.dumps({"facts": [new_fact]}), encoding="utf-8")
         result = career.add_pack(self.root, incoming)
         saved = Path(result["added"])
         saved_bytes = saved.read_bytes()
@@ -332,7 +360,7 @@ class CareerSafetyTests(unittest.TestCase):
         incoming = self.root / "incoming.json"
         new_fact = copy.deepcopy(self.fact())
         new_fact["id"] = "f_incoming"
-        incoming.write_text(json.dumps({"facts": [new_fact]}))
+        incoming.write_text(json.dumps({"facts": [new_fact]}), encoding="utf-8")
         return incoming
 
     def test_intake_supports_filesystems_without_hardlinks(self):
@@ -342,7 +370,7 @@ class CareerSafetyTests(unittest.TestCase):
                 with mock.patch.object(career.os, "link", side_effect=OSError(code, "hard links unsupported")):
                     result = career.add_pack(self.root, incoming, "without_links")
                 saved = Path(result["added"])
-                self.assertEqual(json.loads(saved.read_text()), json.loads(incoming.read_text()))
+                self.assertEqual(json.loads(saved.read_text(encoding="utf-8")), json.loads(incoming.read_text(encoding="utf-8")))
                 data, _, _ = career.load_data(self.root)
                 self.assertIn("f_incoming", data["facts"])
                 self.assertEqual(list((self.root / "data").glob(".intake-*")), [])
@@ -397,13 +425,13 @@ class CareerSafetyTests(unittest.TestCase):
         protected = self.root / "applications/key/documents/version"
         protected.mkdir(parents=True)
         sentinel = protected / "resume.html"
-        sentinel.write_text("reviewed document")
+        sentinel.write_text("reviewed document", encoding="utf-8")
         with career.open_database(self.root) as db:
             for destination in [self.root / "applications", protected, Path("applications/key/documents/version")]:
                 with self.subTest(destination=str(destination)):
                     with self.assertRaisesRegex(career.ValidationError, "protected workspace storage"):
                         career.export_data(self.root, db, destination)
-                    self.assertEqual(sentinel.read_text(), "reviewed document")
+                    self.assertEqual(sentinel.read_text(encoding="utf-8"), "reviewed document")
                     self.assertEqual(sorted(p.name for p in protected.iterdir()), ["resume.html"])
             result = career.export_data(self.root, db, Path("reports"))
             self.assertEqual(Path(result["manifest"]).parent, self.root.resolve() / "reports")
@@ -462,13 +490,13 @@ class CareerSafetyTests(unittest.TestCase):
                     self.assertEqual(tuple(db.execute("SELECT description,notes FROM jobs WHERE id='job'").fetchone()), (description or "", job["notes"]))
                     self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
                     career.export_data(self.root, db)
-                exported = json.loads((self.root / "exports/career_data.json").read_text())
+                exported = json.loads((self.root / "exports/career_data.json").read_text(encoding="utf-8"))
                 self.assertEqual(exported["jobs"][0], job)
                 self.assertEqual((self.root / "data/seed.json").read_bytes(), source_before)
                 with tempfile.TemporaryDirectory() as clean:
                     restored = Path(clean)
                     (restored / "data").mkdir()
-                    (restored / "data/export.json").write_text(json.dumps(exported))
+                    (restored / "data/export.json").write_text(json.dumps(exported), encoding="utf-8")
                     roundtripped, _, _ = career.load_data(restored)
                     self.assertEqual(roundtripped["jobs"]["job"], job)
 

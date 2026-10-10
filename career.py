@@ -367,7 +367,7 @@ def build(root):
         with contextlib.closing(sqlite3.connect(temporary)) as connection:
             connection.execute("PRAGMA foreign_keys=ON")
             populate(connection, data, origins, packs, schema)
-        with temporary.open("rb") as handle:
+        with temporary.open("r+b") as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, destination)
     finally:
