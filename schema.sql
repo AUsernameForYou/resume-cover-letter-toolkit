@@ -1,6 +1,6 @@
--- Career Vault schema v1. Canonical input is data/*.json; this database is derived.
+-- resume-cover-letter-toolkit schema v2. Canonical input is data/*.json; this database is derived.
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 PRAGMA application_id = 1129726294;
 
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -78,7 +78,8 @@ CREATE TABLE jobs (
     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
     title TEXT NOT NULL, url TEXT NOT NULL, captured_at TEXT NOT NULL,
     source_id TEXT NOT NULL REFERENCES sources(id),
-    status TEXT NOT NULL CHECK(status IN ('captured','closed','unknown')), notes TEXT NOT NULL DEFAULT ''
+    status TEXT NOT NULL CHECK(status IN ('captured','closed','unknown')),
+    description TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE requirements (
     id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id),

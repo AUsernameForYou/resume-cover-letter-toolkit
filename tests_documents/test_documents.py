@@ -10,7 +10,9 @@ class DocumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'private';toolkit.init(root,True)
             draft=documents.initial_draft(root,'example-job',['fact_education'])
-            output=Path(documents.render(root,draft,['html','docx'])['directory'])
+            value=json.loads(draft.read_text());value['letter_date']='2026-10-01';draft.write_text(json.dumps(value))
+            result=documents.render(root,draft,['html','docx']);output=Path(result['directory'])
+            self.assertEqual(result['letter_date'],'2026-10-01')
             for name in ['resume','cover-letter']:
                 with self.subTest(document=name):
                     with zipfile.ZipFile(output/(name+'.docx')) as z:
@@ -18,6 +20,7 @@ class DocumentTests(unittest.TestCase):
                         ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
                         text=' '.join(tree.xpath('//w:t/text()',namespaces=ns))
                         self.assertIn('Jordan Example',text);self.assertIn('25,000',text)
+                        if name=='cover-letter':self.assertIn('October 1, 2026',text);self.assertNotIn('October 01, 2026',text)
                         self.assertIn('https://example.invalid/portfolio',z.read('word/_rels/document.xml.rels').decode())
                         self.assertIn('Georgia',z.read('word/styles.xml').decode())
             self.assertIn('cover-letter.docx',json.loads((output/'manifest.json').read_text())['files'])

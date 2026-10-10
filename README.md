@@ -1,106 +1,122 @@
 # Resume and cover letter toolkit
 
-A local evidence store and command-line workflow for making a résumé and cover letter that agree. Store sourced career facts once, select relevant evidence for a job, and prepare both documents from the same snapshot.
+A local evidence store for preparing a résumé and cover letter that agree. Record sourced career facts once, select relevant evidence for each job, and keep editable drafts and application history in a private workspace.
 
-The core uses Python and SQLite. It makes no AI-provider calls and never submits applications. You can edit the drafts yourself or give a small evidence bundle to your preferred assistant. No API key is required by this program.
+The core uses Python and SQLite. It makes no AI-provider calls and never submits applications. Edit drafts yourself or use a selected prompt with your preferred assistant. No API key is required.
 
-## Try it with fictional data
+## Try the fictional example
 
-Python 3.10 or newer with SQLite FTS5 is required. From this code folder:
-
-```sh
-python toolkit.py init ~/career-demo --example
-python toolkit.py --workspace ~/career-demo draft example-job --fact fact_education
-```
-
-The second command prints a `draft` file path. Replace `/path/to/draft.json` below with that path. Quote it if it contains spaces:
+Install Python 3.10 or newer with SQLite FTS5. From the code folder, run:
 
 ```sh
-python toolkit.py --workspace ~/career-demo check-draft /path/to/draft.json
-python toolkit.py --workspace ~/career-demo render /path/to/draft.json
+python3 toolkit.py init ~/career-demo --example
+python3 toolkit.py --workspace ~/career-demo draft example-job --fact fact_education
 ```
 
-The render command prints a `directory`. Open its `resume.html` and `cover-letter.html` locally. They use matching typography and selectable text and can be printed to PDF in your browser. Everything about Jordan Example, the employers and the job is fictional.
+On Windows, use `py -3` in place of `python3`. Replace `~/career-demo` with a private path outside the checkout, such as `"C:\Career Demo"`. Put each command on one line in PowerShell; the backslash continuation used in some Unix examples is not PowerShell syntax. Quote paths containing spaces.
 
-## Use your own information
-
-Create a separate private workspace:
+The draft command prints a `draft` path. Replace `/path/to/draft.json` below with it:
 
 ```sh
-python toolkit.py init ~/my-career
+python3 toolkit.py --workspace ~/career-demo check-draft /path/to/draft.json
+python3 toolkit.py --workspace ~/career-demo render /path/to/draft.json
 ```
 
-Edit its `profile.json` and add career records to `data/`. Each claim needs a source, date, scope and status. Use [Getting started](docs/GETTING_STARTED.md) for the field guide and an assistant-ready intake prompt. Original résumés and notes belong in the workspace's private `inputs/` folder, never in this repository.
+The render command prints a `directory` and `letter_date`. Open that directory's `resume.html` and `cover-letter.html` locally. They share typography and can be printed to PDF in your browser. Jordan Example, the employers, the university and the posting are fictional.
+
+The initial draft is a rough first pass built from source wording. Rewrite it before sending. Choose your evidence deliberately: the résumé includes selected roles, newest first, rather than every unselected job in your history. A role without a recorded end date says `Started YEAR`; the tool does not infer that an old source proves present employment.
+
+## Add your information
+
+```sh
+python3 toolkit.py init ~/my-career
+```
+
+Edit `profile.json` and the empty `data/base.json` in that new workspace. [Getting started](docs/GETTING_STARTED.md) walks through the workflow; the [field reference](docs/SCHEMA.md) lists every accepted field and includes a minimal valid pack. Keep original résumés and notes in the workspace's `inputs/` folder, outside this repository.
 
 After editing records:
 
 ```sh
-python toolkit.py --workspace ~/my-career validate
-python toolkit.py --workspace ~/my-career build
-python toolkit.py --workspace ~/my-career search "project coordination"
-python toolkit.py --workspace ~/my-career export
-python toolkit.py --workspace ~/my-career validate-exports
+python3 toolkit.py --workspace ~/my-career validate
+python3 toolkit.py --workspace ~/my-career build
+python3 toolkit.py --workspace ~/my-career search "project coordination"
+python3 toolkit.py --workspace ~/my-career export
+python3 toolkit.py --workspace ~/my-career validate-exports
 ```
 
-## Résumés and cover letters share one evidence bundle
+Results are printed as JSON. `validate` checks source records and the profile; `build` recreates the searchable database. Edit the source JSON, then rebuild, rather than editing the derived SQLite database.
 
-Save a job description locally and capture it:
+## Prepare both documents for a job
+
+Save the posting as a local text file. `capture-job` reads that file; it does not fetch the URL:
 
 ```sh
-python toolkit.py --workspace ~/my-career capture-job delivery-role \
-  --company "Example Company" --title "Delivery Lead" \
-  --url "https://example.invalid/job" --description ~/my-career/inputs/job.txt
-python toolkit.py --workspace ~/my-career build
-python toolkit.py --workspace ~/my-career bundle delivery-role --fact your_fact_id
-python toolkit.py --workspace ~/my-career draft delivery-role --fact your_fact_id
+python3 toolkit.py --workspace ~/my-career capture-job delivery-role --company "Example Company" --title "Delivery Lead" --url "https://example.invalid/job" --description ~/my-career/inputs/job.txt
+python3 toolkit.py --workspace ~/my-career build
+python3 toolkit.py --workspace ~/my-career draft delivery-role --fact your_fact_id
 ```
 
-The bundle includes selected eligible facts, their sources and the job context. It writes separate résumé and cover-letter prompts with the same draft contract. It does not include unrelated or ineligible records. A `match` report uses your explicit curated mappings; it is evidence coverage, not an ATS score or hiring prediction.
+Replace `your_fact_id` with a fact in your workspace. Repeat `--fact` to add useful breadth. Curated requirement/match records can also select evidence. A `match` report shows documented coverage; it is not an ATS score or hiring prediction.
 
-The initial draft keeps source wording. Improve its prose yourself or with your chosen assistant. Identity, employers, titles and dates are rendered from the stored profile and role records. Extra breadth can be selected with repeated `--fact` arguments.
+`draft` also prepares private evidence and separate résumé/cover-letter prompts. `bundle JOB_ID --fact FACT_ID` prepares those without making another starter draft. Review a prompt before sharing it. Prompts exclude profile contacts, source paths and URLs, private notes, excerpts and pack filenames; they still share selected claims, employer names, source titles, metrics, job-description text and your motivation. The full `bundle.json` stays private.
 
-Run `check-draft`, preview the pair, and review the meaning yourself. References and numeric checks cannot prove that a paraphrase is true. Check shared contributions, approximate amounts, project versus personal scope, historical dates, credentials and planned versus delivered work.
+Your assistant should return only `summary`, `resume_bullets` and `cover_letter`. Copy those three values into your existing local draft. Keep generated metadata and selected IDs unchanged. Names, employers, role titles and dates come from stored records.
+
+Run `check-draft`, render a preview and review both documents. References and numeric checks cannot prove a paraphrase is true. Check individual versus shared work, approximate amounts, qualifications and planned versus delivered results. Set `letter_date` to the date you intend to use before approval; it is a fixed ISO date in the draft and does not silently change when you render later.
 
 ```sh
-python toolkit.py --workspace ~/my-career approve /path/to/reviewed-draft.json
-python toolkit.py --workspace ~/my-career render /path/to/reviewed-draft.json --final
+python3 toolkit.py --workspace ~/my-career approve /path/to/reviewed-draft.json
+python3 toolkit.py --workspace ~/my-career render /path/to/reviewed-draft.json --final
 ```
 
-A changed draft, profile or source snapshot requires new review. The tool records private document versions and manual application status in a separate SQLite ledger, preserved when the career database is rebuilt:
+The approval receipt records an attestation tied to the exact file hash. It does not authenticate a human identity. A person owns the factual review and sending decision; an assistant must not approve its own real application prose. Editing the draft, date, profile or source snapshot requires new review.
+
+## Recover an out-of-date draft
+
+Source changes, capturing another job or updating the toolkit can invalidate an older snapshot. Rebuild the database first, then carry your edited prose into a new draft:
 
 ```sh
-python toolkit.py --workspace ~/my-career history
-python toolkit.py --workspace ~/my-career status VERSION_ID interview
+python3 toolkit.py --workspace ~/my-career build
+python3 toolkit.py --workspace ~/my-career refresh-draft /path/to/old-draft.json
 ```
 
-`applied` is a manual record of an action you took elsewhere. The toolkit has no submission function.
+The result prints the new `path`, reported `changes`, `review_required` and `letter_date`. Old drafts and receipts are preserved. Review the new file against current evidence, preview it, then approve it again. Refresh also upgrades legacy version-1 drafts. It refuses unknown/ineligible references or prose that fails current checks; it does not silently repair claims or transfer approval.
+
+## Track what you do elsewhere
+
+```sh
+python3 toolkit.py --workspace ~/my-career history
+python3 toolkit.py --workspace ~/my-career status VERSION_ID interview
+```
+
+Use the version ID returned by rendering. `applied`, `interview`, `closed` and `declined` are manual records of external actions; they can be recorded for a preview and do not imply review. Only `render --final` records `ready`. The separate application-history database survives rebuilding the career evidence database. There is no submission function.
 
 ## Optional Word and PDF output
 
 ```sh
-python -m pip install -r requirements-documents.txt
-python toolkit.py --workspace ~/my-career render /path/to/draft.json --format html --format docx
+python3 -m pip install -r requirements-documents.txt
+python3 toolkit.py --workspace ~/my-career render /path/to/draft.json --format html --format docx
 ```
 
-For direct PDF conversion, install LibreOffice from its official distribution and add `--format pdf` to the render command; `--soffice /path/to/soffice` selects an explicit executable. PDF output also needs the Word dependency above. Otherwise print the HTML locally or export from Word. Résumé length is flexible; preview pagination before using either document.
+For direct PDF conversion, install LibreOffice from its official distribution and add `--format pdf`; `--soffice /path/to/soffice` selects an executable. PDF also needs the Word dependency above. Otherwise print HTML locally or export from Word. Fonts must be available on your machine. Preview every page and check selectable text and links before using either document. Page length is flexible; no universal ATS compatibility is promised.
 
-## Privacy and safety
+## Troubleshooting
 
-- Keep personal workspaces outside the code checkout. The public repository contains only code, documentation and fictional examples.
-- Inputs, profile details, databases, prompts, drafts and outputs stay in your workspace. Nothing is automatically sent to a model, employer or hosting service.
-- Review a selected prompt before pasting it into an assistant. Keep confidential or restricted material out of application-eligible facts.
-- Do not edit the derived career SQLite file directly. Edit source records and rebuild. The reader checks source/provenance/engine freshness and normalized-record consistency.
-- Exports cannot target protected storage or leave the private workspace. A manifest detects incomplete, changed or stale export generations. Existing unrelated files are preserved.
-- Source text is escaped in readable exports; structured eligibility is never inferred from rendered headings.
+- If the database is stale, run `python3 toolkit.py --workspace YOUR_WORKSPACE build`. The error supplies a command for the affected workspace.
+- If a draft is stale after rebuilding, use `refresh-draft` as described above. Keep its metadata intact.
+- If `init` reports missing FTS5, use a Python installation that includes SQLite FTS5. This check runs before workspace files are created.
+- If the initial database build fails after source files were created, those files are preserved. Resolve the reported cause and run the supplied build command. Do not delete your sources or repeat `init` on that populated folder.
 
-## Development
+## Privacy and development
+
+Keep workspaces outside the code checkout. Inputs, databases, contacts, drafts and outputs stay local unless you deliberately share them. Keep confidential material out of eligible application evidence. Export manifests detect changed, incomplete or stale file sets, and protected workspace storage cannot be used as an export destination.
 
 ```sh
-python -m unittest discover -s tests -v
-python scripts/check_privacy.py
+python3 -m unittest discover -s tests -v
+python3 scripts/check_privacy.py
 ```
 
-See [Design](docs/DESIGN.md), [Comparable projects](docs/RESEARCH.md) and [Validation](docs/VALIDATION.md). Research uses other projects' documented patterns; no third-party implementation code or assets were copied.
+See [Design](docs/DESIGN.md), [Comparable projects](docs/RESEARCH.md) and [Validation](docs/VALIDATION.md). Research uses documented patterns; no third-party implementation code or assets were copied. The privacy checker is a useful check, not a guarantee; review staged files and history before publication.
 
 ## License
 

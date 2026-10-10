@@ -5,6 +5,7 @@ import unittest
 import subprocess
 import contextlib
 import io
+import json
 from unittest import mock
 
 PROJECT=Path(__file__).resolve().parents[1]
@@ -71,6 +72,61 @@ class PrivacyTests(unittest.TestCase):
                         self.assertIsNotNone(privacy.inspect(path))
                 path=root/'guide.txt';path.write_text('github_pat_'+'x'*40)
                 self.assertEqual(privacy.inspect(path),'credential-shaped content')
+
+    def test_linux_home_paths_and_additional_credentials_are_rejected(self):
+        cases={
+            'linux_home':'/'+'home'+'/someone/private',
+            'aws_long_lived':'AK'+'IA'+'A'*16,
+            'aws_temporary':'AS'+'IA'+'A'*16,
+            'google_api':'AI'+'za'+'x'*35,
+            'slack_bot':'xox'+'b-'+'x'*24,
+            'stripe_secret':'sk_'+'live_'+'x'*24,
+            'stripe_restricted':'rk_'+'live_'+'x'*24,
+            'pgp_private':'-----BEGIN '+'PGP PRIVATE KEY BLOCK-----',
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);path=root/'guide.txt'
+            with mock.patch.object(privacy,'ROOT',root):
+                for label,value in cases.items():
+                    with self.subTest(kind=label):
+                        path.write_text(value)
+                        self.assertIsNotNone(privacy.inspect(path))
+
+    def test_json_career_artifacts_are_rejected_in_working_and_staged_bytes(self):
+        samples={
+            'career_pack':{'facts':[{'claim':'Managed a private project.'}]},
+            'draft':{'resume_bullets':[{'fact_id':'f','text':'Private career prose.'}],'cover_letter':[]},
+            'bundle':{'profile':{'name':'Synthetic Candidate'},'snapshot':{},'selected_fact_ids':['f']},
+            'approval':{'draft_sha256':'a'*64,'reviewed_at':'2026-01-01'},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);path=root/'arbitrary.json'
+            subprocess.run(['git','init','--quiet'],cwd=root,check=True)
+            with mock.patch.object(privacy,'ROOT',root):
+                for label,value in samples.items():
+                    with self.subTest(kind=label,location='working'):
+                        path.write_text(json.dumps(value))
+                        self.assertEqual(privacy.inspect(path),'potential private career JSON artifact')
+                    subprocess.run(['git','add','arbitrary.json'],cwd=root,check=True)
+                    path.write_text('{"timeout":5}')
+                    with self.subTest(kind=label,location='staged'):
+                        self.assertTrue(privacy.staged_problems())
+                example=root/'examples/career.json';example.parent.mkdir();example.write_text(json.dumps(samples['career_pack']))
+                self.assertIsNone(privacy.inspect(example))
+                renamed=root/'examples/other.json';renamed.write_text(example.read_text())
+                self.assertIsNotNone(privacy.inspect(renamed))
+                self.assertIsNone(privacy.inspect(path))
+
+    def test_generated_format_and_draft_filename_variants_are_rejected(self):
+        names=['resume.odt','resume.pages','photo.heic','photo.webp','archive.rar','backup.bz2',
+               'reviewed-draft.approval.json','reviewed-draft.json','draft.json','draft-copy.json','resume.draft.json']
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            with mock.patch.object(privacy,'ROOT',root):
+                for name in names:
+                    with self.subTest(name=name):
+                        path=root/name;path.write_text('')
+                        self.assertIsNotNone(privacy.inspect(path))
 
 
 if __name__=='__main__':unittest.main()

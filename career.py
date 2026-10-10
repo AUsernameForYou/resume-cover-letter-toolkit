@@ -6,6 +6,7 @@ import argparse
 import calendar
 import contextlib
 import datetime as dt
+import errno
 import hashlib
 import json
 import math
@@ -17,7 +18,8 @@ import sys
 import tempfile
 from urllib.parse import urlsplit, quote
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+DATABASE_APPLICATION_ID = 1129726294
 ENGINE_FILE = Path(__file__).resolve()
 ROOT = Path(__file__).resolve().parent
 ENTITIES = ("sources", "organizations", "roles", "projects", "facts", "questions", "jobs", "requirements", "matches")
@@ -43,7 +45,7 @@ FIELDS = {
     "projects": "id organization_id name start_date end_date as_of source_ids notes",
     "facts": "id organization_id role_id project_id kind claim start_date end_date as_of scope completion_status verification_status application_eligible tags metrics evidence usage_notes",
     "questions": "id priority question reason related_fact_ids status answer",
-    "jobs": "id organization_id title url captured_at source_id status notes",
+    "jobs": "id organization_id title url captured_at source_id status description notes",
     "requirements": "id job_id category text tags source_locator",
     "matches": "id requirement_id fact_id assessment rationale review_status",
 }
@@ -125,6 +127,8 @@ def ensure_string(value, where, *, nullable=False, empty=False):
         value.encode("utf-8")
     except UnicodeError as exc:
         raise ValidationError(f"{where}: string is not valid UTF-8") from exc
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]", value):
+        raise ValidationError(f"{where}: string contains a character unsupported by document XML")
 
 
 def list_of_strings(value, where):
@@ -191,6 +195,9 @@ def normalize_record(entity, raw, where):
                 raise ValidationError(f"{where}.local_path: must be relative, without parent traversal")
     if entity == "facts":
         validate_fact(record, where)
+    if entity == "matches":
+        if (record["assessment"] == "gap") != (record["fact_id"] is None):
+            raise ValidationError(f"{where}.fact_id: gap matches require null; direct or adjacent matches require a fact ID")
     return record
 
 
@@ -374,7 +381,7 @@ def build(root):
 def open_database(root):
     path = root / "build" / "career.sqlite"
     if not path.is_file():
-        raise ValidationError(f"Database not found: {path}. Run: python career.py build")
+        raise ValidationError(f"Database not found: {path}. Please run build for your private workspace.")
     try:
         current_data, current_origins, current_packs = load_data(root)
     except ValidationError as exc:
@@ -386,9 +393,12 @@ def open_database(root):
     try:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA query_only=ON")
+        application_id = connection.execute("PRAGMA application_id").fetchone()[0]
+        if application_id != DATABASE_APPLICATION_ID:
+            raise ValidationError("Derived database belongs to another application; check your workspace path")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version != SCHEMA_VERSION:
-            raise ValidationError(f"Database schema {version} is unsupported; run build with this version of career.py")
+            raise ValidationError(f"Database schema {version} is unsupported; run build for your private workspace with this toolkit version")
         metadata = dict(connection.execute("SELECT key,value FROM metadata"))
         changed = []
         if metadata.get("data_sha256") != current_data_hash:
@@ -402,7 +412,7 @@ def open_database(root):
         if metadata.get("engine_sha256") != engine_digest():
             changed.append("engine")
         if changed:
-            raise ValidationError(f"Database is stale: {', '.join(changed)} changed; run build: python career.py build. The previous database is unchanged.")
+            raise ValidationError(f"Database is stale: {', '.join(changed)} changed; run build for your private workspace. The previous database is unchanged.")
         stored_data, stored_origins = database_data(connection)
         if stored_data != current_data or stored_origins != current_origins:
             raise ValidationError("Derived database payloads differ from source records; run build")
@@ -542,7 +552,9 @@ def metric_text(metric):
 
 def markdown(value):
     text = str(value).replace("\r", " ").replace("\n", " ")
-    return re.sub(r"([\\`*_{}\[\]()<>#!|])", r"\\\1", text)
+    text = re.sub(r"([\\`*_{}\[\]()<>#!|])", r"\\\1", text)
+    text = re.sub(r"^([ \t]{0,3})([-+])(?=\s|(?:\s*-){2})", r"\1\\\2", text)
+    return re.sub(r"^([ \t]{0,3}[0-9]{1,9})(\.)(?=\s)", r"\1\\\2", text)
 
 
 def literal(value):
@@ -654,10 +666,11 @@ EXPORT_FILES = {"career_inventory.md", "source_index.md", "clarification_list.md
 
 
 def safe_output(root, output):
-    output = Path(output).resolve()
+    output = Path(output)
+    output = (root / output if not output.is_absolute() else output).resolve()
     if not output.is_relative_to(root.resolve()):
         raise ValidationError("Export destination must stay inside your private workspace")
-    for name in ["data", "build", "state", "inputs"]:
+    for name in ["data", "build", "state", "inputs", "applications"]:
         if output.is_relative_to((root / name).resolve()):
             raise ValidationError("Export destination is inside protected workspace storage")
     return output
@@ -720,8 +733,26 @@ def add_pack(root, path, name=None):
             handle.write(pretty(pack))
             handle.flush()
             os.fsync(handle.fileno())
-        # Hard-link creates the destination exclusively; an existing file is never overwritten.
-        os.link(temporary, destination)
+        # Prefer publication of the complete file. Filesystems without hard links
+        # use exclusive creation; the one-writer fallback never replaces a file.
+        try:
+            os.link(temporary, destination)
+        except OSError as exc:
+            unsupported = {errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EXDEV}
+            if exc.errno not in unsupported:
+                raise
+            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    fd = None
+                    handle.write(temporary.read_bytes())
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except BaseException:
+                if fd is not None:
+                    os.close(fd)
+                destination.unlink(missing_ok=True)
+                raise
     finally:
         temporary.unlink(missing_ok=True)
     return {"added": str(destination), "counts": data_counts(data), "next_step": "Run build and export to refresh derived files."}
@@ -729,7 +760,7 @@ def add_pack(root, path, name=None):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--root", type=Path, default=ROOT, help="Career data root; default is the folder containing career.py")
+    result.add_argument("--root", type=Path, required=True, help="Your private career workspace, outside the code checkout")
     subs = result.add_subparsers(dest="command", required=True)
     for name in ("build", "validate", "stats", "search", "show", "questions", "export", "validate-exports", "match", "add"):
         sub = subs.add_parser(name)
@@ -771,9 +802,9 @@ def main(argv=None):
                         raise ValidationError("Search limit must be between 1 and 1000")
                     result = search(connection, " ".join(args.query), args.include_context, args.include_unconfirmed, args.limit)
                 elif args.command == "export":
-                    result = export_data(root, connection, args.output_dir.resolve() if args.output_dir else None)
+                    result = export_data(root, connection, args.output_dir)
                 elif args.command == "validate-exports":
-                    result = validate_exports(root, connection, args.output_dir.resolve() if args.output_dir else None)
+                    result = validate_exports(root, connection, args.output_dir)
                 else:
                     data, origins = database_data(connection)
                     if args.command == "stats":
@@ -785,7 +816,7 @@ def main(argv=None):
                         result = sorted_questions(data, args.all)
                     elif args.command == "match":
                         result = match_job(data, args.job_id)
-        if args.json or args.command in {"build", "validate", "stats", "export", "add"}:
+        if args.json or args.command in {"build", "validate", "stats", "export", "validate-exports", "add"}:
             print(pretty(result), end="")
         elif args.command == "search":
             if not result:

@@ -37,6 +37,15 @@
         "src_posting"
       ],
       "description": "Fictional hiring company."
+    },
+    {
+      "id": "org_university",
+      "name": "Example State University",
+      "kind": "university",
+      "source_ids": [
+        "src_profile"
+      ],
+      "description": "Fictional university."
     }
   ],
   "roles": [
@@ -184,7 +193,7 @@
     },
     {
       "id": "fact_education",
-      "organization_id": "org_work",
+      "organization_id": "org_university",
       "role_id": null,
       "project_id": null,
       "kind": "education",
@@ -285,7 +294,8 @@
       "captured_at": "2026-01-15",
       "source_id": "src_posting",
       "status": "captured",
-      "notes": "Coordinate construction teams, review supplier costs, improve auditable workflows and communicate technical decisions."
+      "notes": "",
+      "description": "Coordinate construction teams, review supplier costs, improve auditable workflows and communicate technical decisions."
     }
   ],
   "requirements": [

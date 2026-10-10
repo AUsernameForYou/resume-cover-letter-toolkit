@@ -19,3 +19,11 @@ vaults/
 .DS_Store
 ._*
 test-results/
+*.approval.json
+draft.json
+draft-*.json
+draft_*.json
+*.draft.json
+*-draft.json
+*_draft.json
+*-draft-*.json

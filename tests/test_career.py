@@ -1,7 +1,10 @@
 """Risk-focused tests for source quality, safe retrieval, and rebuild safety."""
 import copy
+import contextlib
+import errno
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -275,6 +278,199 @@ class CareerSafetyTests(unittest.TestCase):
         with sqlite3.connect(self.root / "build" / "career.sqlite") as db:
             with self.assertRaises(sqlite3.IntegrityError):
                 db.execute("UPDATE facts SET application_eligible=1 WHERE id='f_company'")
+
+    def test_match_validation_and_build_agree_on_gap_fact_references(self):
+        career.build(self.root)
+        before = (self.root / "build/career.sqlite").read_bytes()
+        for assessment, fact in [("direct", None), ("adjacent", None), ("gap", "f_ready")]:
+            with self.subTest(assessment=assessment, valid=False):
+                self.pack = fixture()
+                self.pack["matches"][0].update(assessment=assessment, fact_id=fact)
+                self.write_pack()
+                for operation in [career.load_data, career.build]:
+                    with self.assertRaisesRegex(career.ValidationError, "gap matches require null"):
+                        operation(self.root)
+                self.assertEqual(before, (self.root / "build/career.sqlite").read_bytes())
+        for assessment, fact in [("direct", "f_ready"), ("adjacent", "f_ready"), ("gap", None)]:
+            with self.subTest(assessment=assessment, valid=True):
+                self.pack = fixture()
+                self.pack["matches"][0].update(assessment=assessment, fact_id=fact)
+                self.write_pack()
+                career.load_data(self.root)
+                career.build(self.root)
+                with career.open_database(self.root) as db:
+                    self.assertEqual(tuple(db.execute("SELECT assessment,fact_id FROM matches WHERE id='m_ready'").fetchone()), (assessment, fact))
+
+    def test_core_cli_requires_workspace_and_recovery_hint_is_safe(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as exc:
+                career.parser().parse_args(["build"])
+        self.assertEqual(exc.exception.code, 2)
+        with self.assertRaisesRegex(career.ValidationError, "run build for your private workspace") as exc:
+            with career.open_database(self.root):
+                self.fail("missing database must fail")
+        self.assertNotIn("python career.py build", str(exc.exception))
+        self.assertFalse((self.root / "build").exists())
+
+    def test_wrong_database_application_id_is_rejected_read_only(self):
+        career.build(self.root)
+        path = self.root / "build/career.sqlite"
+        for application_id in [0, 12345]:
+            with self.subTest(application_id=application_id):
+                with sqlite3.connect(path) as db:
+                    db.execute(f"PRAGMA application_id={application_id}")
+                before = path.read_bytes()
+                with self.assertRaisesRegex(career.ValidationError, "belongs to another application"):
+                    with career.open_database(self.root):
+                        self.fail("foreign identity must not be exposed")
+                self.assertEqual(before, path.read_bytes())
+        career.build(self.root)
+        with career.open_database(self.root) as db:
+            self.assertEqual(db.execute("PRAGMA application_id").fetchone()[0], career.DATABASE_APPLICATION_ID)
+
+    def incoming_pack(self):
+        incoming = self.root / "incoming.json"
+        new_fact = copy.deepcopy(self.fact())
+        new_fact["id"] = "f_incoming"
+        incoming.write_text(json.dumps({"facts": [new_fact]}))
+        return incoming
+
+    def test_intake_supports_filesystems_without_hardlinks(self):
+        incoming = self.incoming_pack()
+        for code in sorted({errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP, errno.EXDEV}):
+            with self.subTest(errno=code):
+                with mock.patch.object(career.os, "link", side_effect=OSError(code, "hard links unsupported")):
+                    result = career.add_pack(self.root, incoming, "without_links")
+                saved = Path(result["added"])
+                self.assertEqual(json.loads(saved.read_text()), json.loads(incoming.read_text()))
+                data, _, _ = career.load_data(self.root)
+                self.assertIn("f_incoming", data["facts"])
+                self.assertEqual(list((self.root / "data").glob(".intake-*")), [])
+                saved.unlink()
+
+    def test_intake_fallback_preserves_concurrently_created_destination(self):
+        incoming = self.incoming_pack()
+        destination = self.root / "data/intake_incoming.json"
+        def competing_file(*args):
+            destination.write_bytes(b"another writer's file")
+            raise OSError(errno.EOPNOTSUPP, "hard links unsupported")
+        with mock.patch.object(career.os, "link", side_effect=competing_file):
+            with self.assertRaises(FileExistsError):
+                career.add_pack(self.root, incoming)
+        self.assertEqual(destination.read_bytes(), b"another writer's file")
+        self.assertEqual(list((self.root / "data").glob(".intake-*")), [])
+
+    def test_intake_fallback_write_failure_removes_only_owned_partial_file(self):
+        incoming = self.incoming_pack()
+        source_before = (self.root / "data/seed.json").read_bytes()
+        incoming_before = incoming.read_bytes()
+        original_fsync = career.os.fsync
+        calls = []
+        def fail_destination_sync(fd):
+            calls.append(fd)
+            if len(calls) == 2:
+                raise OSError(errno.ENOSPC, "disk full")
+            return original_fsync(fd)
+        with mock.patch.object(career.os, "link", side_effect=OSError(errno.EOPNOTSUPP, "hard links unsupported")):
+            with mock.patch.object(career.os, "fsync", side_effect=fail_destination_sync):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    career.add_pack(self.root, incoming)
+        self.assertEqual(len(calls), 2)
+        self.assertFalse((self.root / "data/intake_incoming.json").exists())
+        self.assertEqual((self.root / "data/seed.json").read_bytes(), source_before)
+        self.assertEqual(incoming.read_bytes(), incoming_before)
+        self.assertEqual(list((self.root / "data").glob(".intake-*")), [])
+
+    def test_intake_does_not_mask_other_hardlink_errors(self):
+        incoming = self.incoming_pack()
+        for code in [errno.EACCES, errno.EIO]:
+            with self.subTest(errno=code):
+                with mock.patch.object(career.os, "link", side_effect=OSError(code, "original I/O failure")):
+                    with self.assertRaises(OSError) as exc:
+                        career.add_pack(self.root, incoming)
+                self.assertEqual(exc.exception.errno, code)
+                self.assertFalse((self.root / "data/intake_incoming.json").exists())
+                self.assertEqual(list((self.root / "data").glob(".intake-*")), [])
+
+    def test_exports_protect_application_packages_and_resolve_relative_workspace_paths(self):
+        career.build(self.root)
+        protected = self.root / "applications/key/documents/version"
+        protected.mkdir(parents=True)
+        sentinel = protected / "resume.html"
+        sentinel.write_text("reviewed document")
+        with career.open_database(self.root) as db:
+            for destination in [self.root / "applications", protected, Path("applications/key/documents/version")]:
+                with self.subTest(destination=str(destination)):
+                    with self.assertRaisesRegex(career.ValidationError, "protected workspace storage"):
+                        career.export_data(self.root, db, destination)
+                    self.assertEqual(sentinel.read_text(), "reviewed document")
+                    self.assertEqual(sorted(p.name for p in protected.iterdir()), ["resume.html"])
+            result = career.export_data(self.root, db, Path("reports"))
+            self.assertEqual(Path(result["manifest"]).parent, self.root.resolve() / "reports")
+            self.assertTrue(career.validate_exports(self.root, db, Path("reports"))["valid"])
+            with self.assertRaisesRegex(career.ValidationError, "must stay inside"):
+                career.export_data(self.root, db, Path("../outside"))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = career.main(["--root", str(self.root), "validate-exports", "--output-dir", "reports"])
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(output.getvalue())["valid"])
+
+    def test_markdown_neutralizes_leading_lists_and_rules(self):
+        cases = {"- source prose": "\\- source prose", "+ source prose": "\\+ source prose", "1. source prose": "1\\. source prose", "  12. source prose": "  12\\. source prose", "1) source prose": "1\\) source prose", "---": "\\---", "  - - -": "  \\- - -", "ordinary prose": "ordinary prose", "cost - benefit": "cost - benefit", "-word": "-word"}
+        for raw, escaped in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(career.markdown(raw), escaped)
+        self.pack["organizations"][0]["description"] = "- fake export list"
+        self.fact()["claim"] = "---"
+        self.write_pack()
+        data, _, _ = career.load_data(self.root)
+        rendered = career.render_inventory(data)
+        self.assertIn("\\- fake export list", rendered)
+        self.assertIn("\\---", rendered)
+
+    def test_source_strings_reject_xml_invalid_controls_and_keep_valid_whitespace(self):
+        for character in ["\x00", "\x01", "\x0b", "\x0c", "\x1f", "\ufffe", "\uffff"]:
+            with self.subTest(codepoint=ord(character)):
+                self.pack = fixture()
+                self.fact()["claim"] = "source" + character
+                self.write_pack()
+                with self.assertRaises(career.ValidationError):
+                    career.load_data(self.root)
+        self.pack = fixture()
+        self.fact()["claim"] = "Résumé\twith\nvalid\rwhitespace and 😀"
+        self.write_pack()
+        data, _, _ = career.load_data(self.root)
+        self.assertEqual(data["facts"]["f_ready"]["claim"], self.fact()["claim"])
+
+    def test_job_description_roundtrips_separately_from_private_notes(self):
+        for description in ["Public role details about grid delivery.", None]:
+            with self.subTest(description=description):
+                self.pack = fixture()
+                self.pack["jobs"][0]["notes"] = "Private follow-up note for the example job."
+                if description is not None:
+                    self.pack["jobs"][0]["description"] = description
+                self.write_pack()
+                source_before = (self.root / "data/seed.json").read_bytes()
+                data, _, _ = career.load_data(self.root)
+                job = data["jobs"]["job"]
+                self.assertEqual(job["description"], description or "")
+                self.assertEqual(job["notes"], self.pack["jobs"][0]["notes"])
+                built = career.build(self.root)
+                self.assertEqual(built["schema_version"], 2)
+                with career.open_database(self.root) as db:
+                    self.assertEqual(tuple(db.execute("SELECT description,notes FROM jobs WHERE id='job'").fetchone()), (description or "", job["notes"]))
+                    self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+                    career.export_data(self.root, db)
+                exported = json.loads((self.root / "exports/career_data.json").read_text())
+                self.assertEqual(exported["jobs"][0], job)
+                self.assertEqual((self.root / "data/seed.json").read_bytes(), source_before)
+                with tempfile.TemporaryDirectory() as clean:
+                    restored = Path(clean)
+                    (restored / "data").mkdir()
+                    (restored / "data/export.json").write_text(json.dumps(exported))
+                    roundtripped, _, _ = career.load_data(restored)
+                    self.assertEqual(roundtripped["jobs"]["job"], job)
 
 
 if __name__ == "__main__":
