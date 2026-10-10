@@ -559,7 +559,7 @@ def source_reference(source):
         return title
     parsed = urlsplit(uri)
     if parsed.scheme.lower() in {"http", "https", "mailto"} and (parsed.netloc or parsed.scheme.lower() == "mailto"):
-        return f"[{title}]({quote(uri, safe=":/?&=#@+%.-_~")})"
+        return f"[{title}]({quote(uri, safe=':/?&=#@+%.-_~')})"
     return title + " (" + literal(uri) + ")"
 
 
