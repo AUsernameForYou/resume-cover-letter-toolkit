@@ -117,6 +117,14 @@ def prompt_context(context):
             "organizations": [fields(row, ["id", "name", "kind"]) for row in context["organizations"]]}
 
 
+def cache_entries(directory, expected):
+    """Keep unrelated files visible while tolerating regular platform metadata."""
+    metadata = {".DS_Store", "Thumbs.db", "desktop.ini"}
+    metadata.update("._" + name for name in expected)
+    return {item.name for item in directory.iterdir()
+            if item.name not in metadata or item.is_symlink() or not item.is_file()}
+
+
 def bundle(root, job_id, extra_ids=()):
     person = profile(root)
     with career.open_database(root) as db:
@@ -159,7 +167,7 @@ def bundle(root, job_id, extra_ids=()):
         if directory.is_symlink() or not (directory / "manifest.json").is_file():
             raise career.ValidationError("Saved evidence bundle is changed or incomplete; it was not overwritten")
         saved = career.parse_pack(directory / "manifest.json")
-        if saved != manifest or {item.name for item in directory.iterdir()} != set(files) | {"manifest.json"}:
+        if saved != manifest or cache_entries(directory, set(files) | {"manifest.json"}) != set(files) | {"manifest.json"}:
             raise career.ValidationError("Saved evidence bundle is changed or incomplete; it was not overwritten")
         for name, wanted in hashes.items():
             path = directory / name
@@ -296,7 +304,11 @@ def refresh_draft(root, oldpath):
     original_bundle = None
     evidence_root = evidence_dir.parent
     for file in sorted(evidence_root.glob('*/bundle.json')):
-        value = career.parse_pack(application_path(root, file))
+        try:
+            value = career.parse_pack(application_path(root, file))
+        except (career.ValidationError, OSError):
+            # Historical comparison is optional; an unrelated broken cache is not draft authority.
+            continue
         if (isinstance(value, dict) and isinstance(value.get('snapshot'),dict)
                 and isinstance(value.get('facts'),list) and isinstance(value.get('sources'),list)
                 and all(isinstance(row,dict) and isinstance(row.get('id'),str) for row in value['facts']+value['sources'])
@@ -309,7 +321,8 @@ def refresh_draft(root, oldpath):
                                                    if key != 'packs' and candidate['snapshot'].get(key) != previous['snapshot'].get(key)),
                "legacy_format_upgraded": previous['format_version'] != FORMAT_VERSION,
                "letter_date_added": 'letter_date' not in previous,
-               "facts_changed": None, "sources_changed": None, "job_changed": None}
+               "facts_changed": None, "sources_changed": None, "job_changed": None,
+               "comparison_available": original_bundle is not None}
     if original_bundle is not None:
         changes['job_changed'] = original_bundle.get('job') != context['job']
         oldfacts = {row['id']: row for row in original_bundle['facts']}
@@ -519,7 +532,7 @@ def render(root,path,formats=('html',),final=False,soffice=None):
                 or manifest.get('review_required') is not (manifest['status']=='draft')
                 or not isinstance(manifest.get('created_at'),str)
                 or not isinstance(manifest.get('files'),dict) or set(manifest['files'])!=expected_files
-                or {item.name for item in out.iterdir()} != expected_files | {'manifest.json'}):
+                or cache_entries(out, expected_files | {'manifest.json'}) != expected_files | {'manifest.json'}):
             raise career.ValidationError('Saved application package is changed or incomplete')
         try:
             dt.datetime.fromisoformat(manifest['created_at'])

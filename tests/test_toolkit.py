@@ -342,6 +342,65 @@ class ToolkitTests(unittest.TestCase):
         self.assertEqual(documents.history(self.root)[0]['status'],'applied')
         self.assertTrue(json.loads((Path(result['directory'])/'manifest.json').read_text())['review_required'])
 
+    def test_platform_metadata_is_preserved_when_both_generated_caches_are_reused(self):
+        _,evidence=documents.bundle(self.root,'example-job',['fact_education'])
+        path=self.draft();result=documents.render(self.root,path);output=Path(result['directory'])
+        for label,directory,required in [('evidence',evidence,'bundle.json'),('documents',output,'resume.html')]:
+            original={file.name:file.read_bytes() for file in directory.iterdir()}
+            for name in ['.DS_Store','Thumbs.db','desktop.ini','._'+required,'._manifest.json']:
+                with self.subTest(cache=label,metadata=name):
+                    marker=directory/name;marker.write_bytes(b'platform metadata retained')
+                    if label=='evidence':self.assertEqual(documents.bundle(self.root,'example-job',['fact_education'])[1],evidence)
+                    else:self.assertEqual(documents.render(self.root,path),result)
+                    self.assertEqual(marker.read_bytes(),b'platform metadata retained')
+            for name,content in original.items():self.assertEqual((directory/name).read_bytes(),content)
+
+    def test_unknown_extras_and_nonregular_metadata_still_block_both_caches(self):
+        _,evidence=documents.bundle(self.root,'example-job',['fact_education'])
+        path=self.draft();result=documents.render(self.root,path);output=Path(result['directory'])
+        target=self.root/'inputs/target.txt';target.write_text('private target retained')
+        for label,directory in [('evidence',evidence),('documents',output)]:
+            original={file.name:file.read_bytes() for file in directory.iterdir()}
+            for kind,name in [('unknown','unrelated.txt'),('unknown AppleDouble','._unrelated.txt'),('symlink','.DS_Store'),('directory','Thumbs.db')]:
+                with self.subTest(cache=label,extra=kind):
+                    marker=directory/name
+                    if kind=='symlink':marker.symlink_to(target)
+                    elif kind=='directory':marker.mkdir()
+                    else:marker.write_text('foreign file retained')
+                    with self.assertRaisesRegex(career.ValidationError,'changed or incomplete'):
+                        if label=='evidence':documents.bundle(self.root,'example-job',['fact_education'])
+                        else:documents.render(self.root,path)
+                    self.assertTrue(marker.exists())
+                    self.assertEqual(target.read_text(),'private target retained')
+                    for filename,content in original.items():self.assertEqual((directory/filename).read_bytes(),content)
+                    if kind=='directory':marker.rmdir()
+                    else:marker.unlink()
+
+    def test_refresh_skips_unrelated_bad_bundles_and_reports_unavailable_comparison(self):
+        _,original_bundle=documents.bundle(self.root,'example-job',['fact_education'])
+        path=self.draft();original=path.read_bytes();documents.approve(self.root,path)
+        receipt=path.with_suffix('.approval.json').read_bytes()
+        root=original_bundle.parent
+        for name,payload in [('!malformed','{broken'),('!non-object','[]')]:
+            sibling=root/name;sibling.mkdir();(sibling/'bundle.json').write_text(payload)
+        pack=self.read();pack['sources'][0]['notes']='Updated source note.';self.write(pack);career.build(self.root)
+        first=documents.refresh_draft(self.root,path);new=Path(first['path']);documents.check_draft(self.root,new)
+        self.assertTrue(first['changes']['comparison_available']);self.assertIn('src_profile',first['changes']['sources_changed'])
+        self.assertEqual(path.read_bytes(),original);self.assertEqual(path.with_suffix('.approval.json').read_bytes(),receipt)
+        self.assertFalse(new.with_suffix('.approval.json').exists())
+        # Simulate a lost baseline without deleting its bytes; refresh must report unknown comparison.
+        oldfile=original_bundle/'bundle.json';oldfile.rename(original_bundle/'bundle.saved')
+        second=documents.refresh_draft(self.root,path);self.assertFalse(second['changes']['comparison_available'])
+        self.assertIsNone(second['changes']['facts_changed']);self.assertIsNone(second['changes']['sources_changed']);self.assertIsNone(second['changes']['job_changed'])
+        self.assertEqual(path.read_bytes(),original);self.assertFalse(Path(second['path']).with_suffix('.approval.json').exists())
+        invalid=json.loads(original);invalid['resume_bullets'][0]['text']='Managed 999 coordinators';path.write_text(json.dumps(invalid))
+        with self.subTest(current_check='unsupported numeric prose'):
+            with self.assertRaisesRegex(career.ValidationError,'numeric'):documents.refresh_draft(self.root,path)
+        path.write_bytes(original);pack['facts'][0]['application_eligible']=False;self.write(pack);career.build(self.root)
+        with self.subTest(current_check='ineligible evidence'):
+            with self.assertRaisesRegex(career.ValidationError,'eligible'):documents.refresh_draft(self.root,path)
+        for name,payload in [('!malformed','{broken'),('!non-object','[]')]:self.assertEqual((root/name/'bundle.json').read_text(),payload)
+
 
 class AuditRegressionTests(unittest.TestCase):
     def setUp(self):
