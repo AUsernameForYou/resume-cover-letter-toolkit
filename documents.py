@@ -11,9 +11,10 @@ import sqlite3
 import subprocess
 import tempfile
 import career
+import review
 
 FORMAT_VERSION = 2
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 LEDGER_VERSION = 1
 LEDGER_ID = 1381192779
 STATUSES = {"draft", "ready", "applied", "interview", "closed", "declined"}
@@ -83,9 +84,10 @@ def application_path(root, path):
 
 def draft_path(root, path):
     path = application_path(root, path)
-    if path.suffix != ".json" or path.name.endswith(".approval.json"):
+    if path.suffix != ".json" or path.name.endswith((".approval.json", ".self-review.json")):
         raise career.ValidationError("Choose a draft JSON file inside the private workspace applications directory")
     application_path(root, path.with_suffix(".approval.json"))
+    application_path(root, path.with_suffix(".self-review.json"))
     return path
 
 
@@ -126,6 +128,7 @@ def cache_entries(directory, expected):
 
 
 def bundle(root, job_id, extra_ids=()):
+    policy = review.status(root)
     person = profile(root)
     with career.open_database(root) as db:
         data, origins = career.database_data(db)
@@ -155,8 +158,14 @@ def bundle(root, job_id, extra_ids=()):
              "Return prose-only JSON: summary, resume_bullets and cover_letter. A person copies these three fields into their existing local draft. "
              "All other fixed draft fields, selected_fact_ids, hashes and the letter date stay unchanged locally and must never be regenerated. "
              "Cover-letter kind is supported_claim, personal_statement or future_plan. Fact references and numeric checks do not prove semantic truth. "
-             "Internal usage notes are excluded: a person must review source qualifiers and all prose against the full private bundle. "
-             "Do not approve your own draft, send applications or access unrelated records.\nDRAFT CONTRACT:\n" + career.pretty(contract))
+             "Internal usage notes are excluded: review source qualifiers and all prose against the full private bundle locally. "
+             "Before intake, read review-mode. If onboarding_required, your first question must be the review choice question below; "
+             "persist only the user's explicit choice with review-mode. Re-read the preference before finalizing; prompts may be older. "
+             "Manual mode requires the person's review and approve command. AI self-review mode requires claim-by-claim factual and "
+             "quality review of the full private evidence and both previews, review-checklist, a completed self-review report and render --final. "
+             "Never label AI review as human approval. Host-agent rules, legal assent, sensitive-data confirmations and missing factual "
+             "evidence still apply. This preference only covers artifacts, never sending or submission. "
+             "Do not send applications or access unrelated records.\nREVIEW PREFERENCE:\n" + career.pretty(policy) + "\nDRAFT CONTRACT:\n" + career.pretty(contract))
     files = {"bundle.json": career.pretty(result)}
     for kind in ["resume", "cover-letter"]:
         files[kind + "-prompt.txt"] = "Draft a " + kind + " for this job. The resume and cover letter must agree. " + rules + "\n" + career.pretty(prompt_context(result))
@@ -347,6 +356,8 @@ def refresh_draft(root, oldpath):
 
 
 def approve(root, path):
+    if review.status(root)["mode"] != "manual":
+        raise career.ValidationError("AI self-review is selected; use self-review or explicitly change review-mode to manual")
     path = draft_path(root, path)
     draft,_,_=check_draft(root,path)
     receipt={"draft_sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"snapshot":draft["snapshot"],"profile_sha256":draft["profile_sha256"],"reviewed_at":dt.datetime.now(dt.timezone.utc).isoformat(),"review_scope":"Hash-bound attestation recorded by this local command after the operator reviews prose, sources, dates, metrics and role scope. It does not authenticate a human identity; structural checks do not prove semantic truth."}
@@ -364,6 +375,107 @@ def approved(path):
         raise career.ValidationError('Approval receipt is invalid; review and approve the draft again')
     if receipt.get('draft_sha256')!=hashlib.sha256(path.read_bytes()).hexdigest():
         raise career.ValidationError('Draft changed after review; review and approve it again')
+
+
+REVIEW_CHECKS = {"source_fidelity", "scope_and_qualifiers", "pair_consistency", "writing_quality", "rendered_documents"}
+
+
+def review_identity(root):
+    preference = review.preference(root)
+    return (preference["mode"] if preference else "manual"), digest(preference)
+
+
+def document_version(draft_sha, formats, preference_sha):
+    return digest({"draft_sha256": draft_sha, "renderer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                   "formats": sorted(formats), "review_preference_sha256": preference_sha})
+
+
+def review_template(draft, data, draft_sha, preference_sha, version, formats, files):
+    claims = []
+    def claim(key, refs):
+        claims.append({"id": key, "fact_ids": refs,
+                       "source_ids": sorted({item["source_id"] for ref in refs for item in data["facts"][ref]["evidence"]}),
+                       "passed": False, "notes": ""})
+    if draft["summary"].strip(): claim("summary", draft["selected_fact_ids"])
+    for i, bullet in enumerate(draft["resume_bullets"]): claim("resume_bullets." + str(i), [bullet["fact_id"]])
+    for i, block in enumerate(draft["cover_letter"]): claim("cover_letter." + str(i), block["fact_ids"])
+    return {"format_version": 1, "draft_sha256": draft_sha, "review_preference_sha256": preference_sha,
+            "preview_version": version, "preview_directory": "applications/" + package_key(draft["job_id"]) + "/documents/" + version,
+            "formats": sorted(formats), "files": files, "claims": claims,
+            "checks": {key: {"passed": False, "notes": ""} for key in sorted(REVIEW_CHECKS)}, "unresolved_findings": []}
+
+
+def validate_self_review_report(report, expected):
+    if not isinstance(report, dict) or set(report) != set(expected):
+        raise career.ValidationError("Self-review report format is invalid; use review-checklist")
+    for key in set(expected) - {"claims", "checks", "unresolved_findings"}:
+        if type(report[key]) is not type(expected[key]) or report[key] != expected[key]:
+            raise career.ValidationError("Self-review report is stale or changed: " + key + "; run review-checklist and review again")
+    if report["unresolved_findings"] != []:
+        raise career.ValidationError("Resolve all self-review findings before finalizing")
+    claims = report["claims"]
+    if not isinstance(claims, list) or len(claims) != len(expected["claims"]):
+        raise career.ValidationError("Self-review must cover every prose claim")
+    for actual, wanted in zip(claims, expected["claims"]):
+        if (not isinstance(actual, dict) or set(actual) != set(wanted)
+                or any(actual[key] != wanted[key] for key in ["id", "fact_ids", "source_ids"])):
+            raise career.ValidationError("Self-review claim evidence coverage is invalid")
+    checks = report["checks"]
+    if not isinstance(checks, dict) or set(checks) != REVIEW_CHECKS:
+        raise career.ValidationError("Self-review must include every factual and quality check")
+    if any(not isinstance(item, dict) or set(item) != {"passed", "notes"} for item in checks.values()):
+        raise career.ValidationError("Self-review check format is invalid")
+    for item in claims + list(checks.values()):
+        if item.get("passed") is not True or not isinstance(item.get("notes"), str) or not item["notes"].strip():
+            raise career.ValidationError("Every self-review claim and check needs passed: true and evidence/reason notes")
+        career.ensure_string(item["notes"], "self-review notes")
+
+
+def self_review_checklist(root, path, formats=("html",), soffice=None):
+    if review.status(root)["mode"] != "ai-self-review":
+        raise career.ValidationError("Choose ai-self-review explicitly with review-mode before AI review")
+    path = draft_path(root, path)
+    formats = sorted(set(formats))
+    draft, _, data = check_draft(root, path)
+    preview = render(root, path, formats, soffice=soffice)
+    manifest = career.parse_pack(application_path(root, Path(preview["directory"]) / "manifest.json"))
+    _, preference_sha = review_identity(root)
+    return review_template(draft, data, hashlib.sha256(path.read_bytes()).hexdigest(), preference_sha,
+                           preview["version"], formats, manifest["files"])
+
+
+def self_review(root, path, report_path, soffice=None):
+    path = draft_path(root, path)
+    report_path = application_path(root, report_path)
+    report = career.parse_pack(report_path)
+    formats = report.get("formats") if isinstance(report, dict) else None
+    if not isinstance(formats, list) or not formats or any(not isinstance(x, str) for x in formats):
+        raise career.ValidationError("Self-review report formats are invalid")
+    expected = self_review_checklist(root, path, formats, soffice)
+    validate_self_review_report(report, expected)
+    target = application_path(root, path.with_suffix(".self-review.json"))
+    receipt = {"review_kind": "ai-self-review", "reviewed_at": dt.datetime.now(dt.timezone.utc).isoformat(), "report": report}
+    career.atomic_text(target, career.pretty(receipt))
+    return target
+
+
+def self_reviewed(root, path, draft, data, formats, draft_sha, preference_sha, version, out):
+    target = application_path(root, path.with_suffix(".self-review.json"))
+    if not target.is_file():
+        raise career.ValidationError("Complete review-checklist and self-review for this exact draft before finalizing")
+    receipt = career.parse_pack(target)
+    if (not isinstance(receipt, dict) or set(receipt) != {"review_kind", "reviewed_at", "report"}
+            or receipt["review_kind"] != "ai-self-review" or not isinstance(receipt["reviewed_at"], str)):
+        raise career.ValidationError("Self-review receipt is invalid")
+    try: dt.datetime.fromisoformat(receipt["reviewed_at"])
+    except ValueError as exc: raise career.ValidationError("Self-review receipt date is invalid") from exc
+    if not (out / "manifest.json").is_file():
+        raise career.ValidationError("Reviewed preview is missing; run review-checklist and review again")
+    manifest = career.parse_pack(application_path(root, out / "manifest.json"))
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
+        raise career.ValidationError("Reviewed preview manifest is invalid")
+    expected = review_template(draft, data, draft_sha, preference_sha, version, formats, manifest["files"])
+    validate_self_review_report(receipt["report"], expected)
 
 
 def content_blocks(draft, person, data):
@@ -508,7 +620,6 @@ def record_version(root, out, version, draft, draft_sha, status, created_at, pro
 def render(root,path,formats=('html',),final=False,soffice=None):
     path=draft_path(root,path)
     draft,person,data=check_draft(root,path)
-    if final:approved(path)
     requested=set(formats)
     if not requested or requested-{'html','docx','pdf'}:
         raise career.ValidationError('Formats are html, docx and pdf')
@@ -516,8 +627,12 @@ def render(root,path,formats=('html',),final=False,soffice=None):
         executable=soffice or shutil.which('soffice')
         if not executable:raise career.ValidationError('PDF output needs LibreOffice; HTML can also be printed to PDF locally')
     draft_sha=hashlib.sha256(path.read_bytes()).hexdigest()
-    version=digest({'draft_sha256':draft_sha,'renderer_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),'formats':sorted(requested)})
+    mode,preference_sha=review_identity(root)
+    version=document_version(draft_sha,requested,preference_sha)
     out=application_path(root,root/'applications'/package_key(draft['job_id'])/'documents'/version)
+    if final:
+        if mode=='manual':approved(path)
+        else:self_reviewed(root,path,draft,data,requested,draft_sha,preference_sha,version,out)
     if out.exists():
         if out.is_symlink() or not (out/'manifest.json').is_file():
             raise career.ValidationError('Saved application package is changed or incomplete; it was not overwritten')
@@ -528,6 +643,8 @@ def render(root,path,formats=('html',),final=False,soffice=None):
                 or manifest.get('source_metadata')!=draft['snapshot']
                 or manifest.get('profile_sha256')!=draft['profile_sha256']
                 or manifest.get('letter_date')!=draft['letter_date']
+                or manifest.get('review_mode')!=mode or manifest.get('review_preference_sha256')!=preference_sha
+                or manifest.get('review_kind')!=(mode if manifest.get('status')=='ready' else None)
                 or not isinstance(manifest.get('status'),str) or manifest['status'] not in {'draft','ready'}
                 or manifest.get('review_required') is not (manifest['status']=='draft')
                 or not isinstance(manifest.get('created_at'),str)
@@ -545,8 +662,9 @@ def render(root,path,formats=('html',),final=False,soffice=None):
         record_version(root,out,version,draft,draft_sha,status,manifest['created_at'],promote=final or manifest['status']=='ready')
         if final and manifest['status']=='draft':
             manifest['status']='ready';manifest['review_required']=False
+            manifest['review_kind']=mode
             career.atomic_text(out/'manifest.json',career.pretty(manifest))
-        return {'directory':str(out),'version':version,'status':status,'letter_date':draft['letter_date']}
+        return {'directory':str(out),'version':version,'status':status,'letter_date':draft['letter_date'],'review_mode':mode,'review_kind':manifest['review_kind']}
     # Validate ledger ownership before creating artifacts, then record the package transactionally.
     preflight=ledger(root,True)
     preflight.close()
@@ -566,7 +684,7 @@ def render(root,path,formats=('html',),final=False,soffice=None):
         career.atomic_text(staging/'evidence.json',career.pretty(evidence))
         files={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in staging.iterdir() if p.is_file()}
         created_at=dt.datetime.now(dt.timezone.utc).isoformat()
-        manifest={'letter_date':draft['letter_date'],'draft_sha256':draft_sha,'source_metadata':draft['snapshot'],'profile_sha256':draft['profile_sha256'],'formats':sorted(requested),'files':files,'created_at':created_at,'status':'ready' if final else 'draft','review_required':not final}
+        manifest={'letter_date':draft['letter_date'],'draft_sha256':draft_sha,'source_metadata':draft['snapshot'],'profile_sha256':draft['profile_sha256'],'formats':sorted(requested),'files':files,'created_at':created_at,'status':'ready' if final else 'draft','review_required':not final,'review_mode':mode,'review_preference_sha256':preference_sha,'review_kind':mode if final else None}
         career.atomic_text(staging/'manifest.json',career.pretty(manifest))
         if out.exists(): raise career.ValidationError('Document directory appeared during rendering; it was not overwritten')
         staging.rename(out)
@@ -578,7 +696,7 @@ def render(root,path,formats=('html',),final=False,soffice=None):
         # This directory was created by this run; a failed history write leaves no successful package.
         shutil.rmtree(out)
         raise
-    return {'directory':str(out),'version':version,'status':'ready' if final else 'draft','letter_date':draft['letter_date']}
+    return {'directory':str(out),'version':version,'status':'ready' if final else 'draft','letter_date':draft['letter_date'],'review_mode':mode,'review_kind':manifest['review_kind']}
 
 
 def history(root,status=None,version=None):

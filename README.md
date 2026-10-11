@@ -4,6 +4,21 @@ A local evidence store for preparing a résumé and cover letter that agree. Rec
 
 The core uses Python and SQLite. It makes no AI-provider calls and never submits applications. Edit drafts yourself or use a selected prompt with your preferred assistant. No API key is required.
 
+## Choose how documents are reviewed
+
+When no choice is saved, an assistant's first onboarding question is: **"Do you want to manually approve each document pair, or let your AI assistant self-review and finalize it?"** It asks before collecting career documents or intake facts. The choice controls local document review and finalization; external sending or application submission still requires its own authorization.
+
+After creating your private workspace, read or set the choice with:
+
+```sh
+python3 toolkit.py --workspace ~/my-career review-mode
+python3 toolkit.py --workspace ~/my-career review-mode manual
+```
+
+Choose `ai-self-review` instead of `manual` to allow your assistant to check the evidence and both previews, record its review, and finalize the pair without a manual approval step. The toolkit does not run a model itself. The explicit choice is saved in the workspace's private `state/review-preference.json`; your assistant should not ask again once a choice is saved. Run `review-mode manual` or `review-mode ai-self-review` at any time to change it. A missing choice, including in an older workspace, keeps manual approval and reports `onboarding_required: true`.
+
+Either choice preserves factual evidence requirements, sensitive-data sharing confirmations, legal assent and your host assistant's rules. It does not approve sending documents to anyone.
+
 ## Try the fictional example
 
 Install Python 3.10 or newer with SQLite FTS5. From the code folder, run:
@@ -62,14 +77,28 @@ Replace `your_fact_id` with a fact in your workspace. Repeat `--fact` to add use
 
 Your assistant should return only `summary`, `resume_bullets` and `cover_letter`. Copy those three values into your existing local draft. Keep generated metadata and selected IDs unchanged. Names, employers, role titles and dates come from stored records.
 
-Run `check-draft`, render a preview and review both documents. References and numeric checks cannot prove a paraphrase is true. Check individual versus shared work, approximate amounts, qualifications and planned versus delivered results. Set `letter_date` to the date you intend to use before approval; it is a fixed ISO date in the draft and does not silently change when you render later.
+Run `check-draft`, render a preview and review both documents. References and numeric checks cannot prove a paraphrase is true. Check individual versus shared work, approximate amounts, qualifications and planned versus delivered results. Set `letter_date` to the date you intend to use before finalization; it is a fixed ISO date in the draft and does not silently change when you render later.
+
+In manual mode, after the person reviews both documents:
 
 ```sh
 python3 toolkit.py --workspace ~/my-career approve /path/to/reviewed-draft.json
 python3 toolkit.py --workspace ~/my-career render /path/to/reviewed-draft.json --final
 ```
 
-The approval receipt records an attestation tied to the exact file hash. It does not authenticate a human identity. A person owns the factual review and sending decision; an assistant must not approve its own real application prose. Editing the draft, date, profile or source snapshot requires new review.
+The approval receipt records an attestation tied to the exact file hash. It does not authenticate a human identity. An assistant must not label its own review as human approval.
+
+In AI self-review mode, the assistant instead generates a checklist and preview pair, then completes the report after reviewing the private bundle, original evidence and both previews:
+
+```sh
+python3 toolkit.py --workspace ~/my-career review-checklist /path/to/draft.json > ~/my-career/applications/review-report.json
+python3 toolkit.py --workspace ~/my-career self-review /path/to/draft.json --report ~/my-career/applications/review-report.json
+python3 toolkit.py --workspace ~/my-career render /path/to/draft.json --final
+```
+
+Between the first and second commands, fill every generated claim and required check with `passed: true` and specific evidence or reasons in `notes`, and resolve every `unresolved_findings` entry. The generated template is incomplete until reviewed; marking checks passed without examining their meaning is not a review. `self-review` validates the completed report and saves a distinct `.self-review.json` receipt. It requires no `approve` command. For Word/PDF, pass the same repeated `--format` options to `review-checklist` and final `render` and inspect both documents in every format. See [Getting started](docs/GETTING_STARTED.md#ai-self-review) for the checks.
+
+Editing the draft, date, profile or source snapshot requires new review. AI reports and receipts also bind the saved preference and exact preview package; changing that preference invalidates them. Both modes create local ready documents only. You still decide separately whether and where to send them.
 
 ## Recover an out-of-date draft
 
@@ -80,7 +109,7 @@ python3 toolkit.py --workspace ~/my-career build
 python3 toolkit.py --workspace ~/my-career refresh-draft /path/to/old-draft.json
 ```
 
-The result prints the new `path`, reported `changes`, `review_required` and `letter_date`. Old drafts and receipts are preserved. Review the new file against current evidence, preview it, then approve it again. Refresh also upgrades legacy version-1 drafts. It refuses unknown/ineligible references or prose that fails current checks; it does not silently repair claims or transfer approval.
+The result prints the new `path`, reported `changes`, `review_required` and `letter_date`. Old drafts and receipts are preserved. Review the new file against current evidence, preview it, then complete the selected manual or AI self-review workflow again. Refresh also upgrades legacy version-1 drafts. It refuses unknown/ineligible references or prose that fails current checks; it does not silently repair claims or transfer review.
 
 ## Track what you do elsewhere
 

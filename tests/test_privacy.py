@@ -119,7 +119,8 @@ class PrivacyTests(unittest.TestCase):
 
     def test_generated_format_and_draft_filename_variants_are_rejected(self):
         names=['resume.odt','resume.pages','photo.heic','photo.webp','archive.rar','backup.bz2',
-               'reviewed-draft.approval.json','reviewed-draft.json','draft.json','draft-copy.json','resume.draft.json']
+               'reviewed-draft.approval.json','reviewed-draft.json','draft.json','draft-copy.json','resume.draft.json',
+               'pair.self-review.json','review-preference.json','review-report.json','pair-review-report-copy.json']
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             with mock.patch.object(privacy,'ROOT',root):

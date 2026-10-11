@@ -20,6 +20,7 @@ The full evidence bundle stays private. Assistant prompts use an explicit field 
 | exports/ | Generated evidence exports with a commit manifest |
 | applications/ | Selected bundles, editable drafts and versioned document pairs |
 | state/application_history.sqlite | Mutable manual-status/version ledger preserved across rebuilds |
+| state/review-preference.json | Explicit user review choice, preserved across rebuilds |
 
 The reader compares semantic data, source-pack ownership, schema and engine digests, payloads, normalized entities and FTS rows. This protects against stale or inconsistent derived artifacts; it is not an authentication boundary against someone who owns and can rewrite all workspace files.
 
@@ -31,14 +32,20 @@ Evidence bundles and document packages are staged before being moved into their 
 
 ## Review and versioning
 
-Draft format version 2 records an explicit ISO `letter_date`. The rendered date comes from that file, including when a preview is promoted later. Approval is an exact-file-hash attestation recorded by the local command, not human identity authentication or proof of semantic truth. The person remains responsible for review. An assistant must not attest that its own real application prose was human-reviewed.
+Before career intake, an assistant reads `review-mode`. If no choice is saved, its first onboarding question asks whether the person wants manual approval or AI self-review. Only an explicit answer is persisted in `state/review-preference.json`. Existing workspaces with no preference retain manual approval and require onboarding. Reading the preference does not silently create a choice, rebuilds preserve it, and selecting the current mode again leaves its choice identifier unchanged. `review-mode manual` and `review-mode ai-self-review` make changes explicit.
 
-The database checks conservative whole-store freshness, so an unrelated data change or engine update can invalidate an existing draft. `refresh-draft` preserves prose in a new unapproved file bound to current evidence, reports changes when earlier evidence is available, and retains older files. Removed/ineligible references or newly unsupported prose fail rather than being silently repaired. Legacy version-1 drafts are upgraded through this same path.
+Draft format version 2 records an explicit ISO `letter_date`. The rendered date comes from that file, including when a preview is promoted later. In manual mode, `approve` records an exact-file-hash attestation before `render --final`. It is not human identity authentication or proof of semantic truth. An assistant must not attest that its own real application prose was human-reviewed.
 
-Only final rendering sets `ready`. Manual `applied`, `interview`, `closed` and `declined` states record external actions, including actions involving a preview; they do not imply review. Application status and artifact approval are separate facts.
+In AI self-review mode, `review-checklist` validates the draft, renders a preview pair for the requested formats and prints an incomplete report template. The chosen assistant reviews every claim against the full private bundle and source evidence, verifies scope and qualifiers, compares the pair, checks writing and inspects both rendered documents. `self-review` accepts only a complete report with every claim and required check passed, nonempty notes and no unresolved findings. It verifies draft/preference hashes and the exact preview package before recording a distinct `.self-review.json` receipt. `render --final` then requires the reviewed formats and valid receipt without a manual `approve` step. A mode change creates a new choice identifier, invalidating earlier AI reports and receipts even if the mode is later changed back.
+
+The report records an AI attestation of meaningful review. Deterministic checks validate its structure, coverage and artifact binding; they do not perform a model review or prove the claims' truth. Unresolved factual questions must be confirmed or removed. The review preference does not override host-agent rules, legal assent, sensitive-data sharing confirmations or factual evidence requirements.
+
+The database checks conservative whole-store freshness, so an unrelated data change or engine update can invalidate an existing draft. `refresh-draft` preserves prose in a new unreviewed file bound to current evidence, reports changes when earlier evidence is available, and retains older files. Removed/ineligible references or newly unsupported prose fail rather than being silently repaired. Legacy version-1 drafts are upgraded through this same path. Neither form of review transfers to the new draft.
+
+Only final rendering sets `ready`. Manual `applied`, `interview`, `closed` and `declined` states record external actions, including actions involving a preview; they do not imply review. Application status and artifact review are separate facts. The toolkit creates documents and records statuses; neither mode sends them or authorizes external submission.
 
 ## Limits
 
-Fact references and numerical checks do not establish semantic truth. Human review remains necessary for paraphrases, qualifications and attribution. The toolkit does not score employability, guarantee ATS behavior, select people for jobs or submit applications.
+Fact references and numerical checks do not establish semantic truth. The selected reviewer must check paraphrases, qualifications and attribution; AI self-review is not independent factual verification or human approval. The toolkit does not score employability, guarantee ATS behavior, select people for jobs or submit applications.
 
 One person per workspace is the simple privacy model. Use one writer at a time. There is no hosted account system, automatic scraping, external AI integration or credential manager.

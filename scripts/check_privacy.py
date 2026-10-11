@@ -34,7 +34,8 @@ def inspect_name(rel):
         return 'private workspace artifact is included'
     if rel.name.lower()=='.env' or rel.name.lower().startswith('.env.'):
         return 'private workspace artifact is included'
-    if rel.name.lower().endswith('.approval.json') or re.search(r'(?:^|[._-])draft(?:[._-].*)?\.json$',rel.name,re.I):
+    if (rel.name.lower().endswith(('.approval.json','.self-review.json')) or rel.name.lower()=='review-preference.json'
+            or re.search(r'review-report.*\.json$',rel.name,re.I) or re.search(r'(?:^|[._-])draft(?:[._-].*)?\.json$',rel.name,re.I)):
         return 'private draft or approval artifact is included'
     if rel.suffix.lower() in BINARY_SUFFIXES or re.search(r'\.(?:sqlite|db)-(?:wal|shm|journal)$',rel.name,re.I):
         return 'personal/generated binary artifact is included'

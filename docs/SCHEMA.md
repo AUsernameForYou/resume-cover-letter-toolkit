@@ -223,11 +223,48 @@ Installed fonts affect Word/PDF appearance. Choosing a name does not install or 
 | snapshot | Keep the generated evidence/database metadata object |
 | profile_sha256 | Keep the generated profile digest |
 | selected_fact_ids | Keep the generated list of 1–30 unique eligible fact IDs |
-| letter_date | Full ISO date; you may change it before approval |
+| letter_date | Full ISO date; you may change it before finalization |
 | summary | String, possibly empty; must be supported by selected facts |
 | resume_bullets | Nonempty list of `{ "fact_id": "selected_id", "text": "Supported wording" }` |
 | cover_letter | List of 1–8 paragraph objects described below |
 
 Each cover-letter paragraph has exactly `kind`, `text`, and `fact_ids`. `kind` is `supported_claim`, `personal_statement`, or `future_plan`; `text` is nonempty; `fact_ids` is a list drawn from the selected IDs. A supported claim needs at least one fact ID. Personal statements and future plans may have no IDs. A future plan must describe a future approach, never an invented past outcome.
 
-A chosen assistant returns only `{ "summary": "...", "resume_bullets": [...], "cover_letter": [...] }`. Paste these three values into the existing generated draft; do not replace the whole file or regenerate fixed metadata. There are no editable name, employer, role-title or chronology fields in the draft. Those come from the private source records. `refresh-draft` creates a new unapproved file when sources or software change; it does not authorize edits to old metadata.
+A chosen assistant returns only `{ "summary": "...", "resume_bullets": [...], "cover_letter": [...] }`. Paste these three values into the existing generated draft; do not replace the whole file or regenerate fixed metadata. There are no editable name, employer, role-title or chronology fields in the draft. Those come from the private source records. `refresh-draft` creates a new unreviewed file when sources or software change; it does not authorize edits to old metadata or transfer either review receipt.
+
+## Private review preference
+
+Use `review-mode` to read the current status and `review-mode manual` or `review-mode ai-self-review` to save the user's explicit choice in `state/review-preference.json`. This file is separate from profile and evidence data and survives rebuilds.
+
+| Field | Type and meaning |
+| --- | --- |
+| format_version | Integer `1` |
+| mode | `manual` or `ai-self-review` |
+| choice_id | 32 lowercase hexadecimal characters identifying this explicit choice |
+
+A missing file means manual approval is active and `onboarding_required` is true. It is not an implicit choice of either mode. A saved choice means onboarding is complete; an assistant should not ask again. Selecting the same mode preserves the identifier; changing modes generates a new one, invalidating previous AI reports and receipts. Use the command rather than editing this private file yourself.
+
+## AI self-review report
+
+`review-checklist DRAFT` renders a preview pair and prints a JSON report template. Redirect the report to a file within `applications/`, then have the chosen assistant inspect the full private evidence bundle, original sources and both previews. Repeated `--format html|docx|pdf` options select the exact formats to review and later finalize. The command itself does not run a model or complete the review.
+
+| Field | Type and meaning |
+| --- | --- |
+| format_version | Generated report version; keep unchanged |
+| draft_sha256 | Exact draft digest; keep unchanged |
+| review_preference_sha256 | Digest of the saved review choice; keep unchanged |
+| preview_version | Generated preview version identifier; keep unchanged |
+| preview_directory | Generated workspace-relative path `applications/{job-key}/documents/{preview_version}` containing both previews; keep unchanged |
+| formats | Generated list of reviewed output formats; keep unchanged |
+| files | Generated preview file hashes; keep unchanged |
+| claims | Generated entries for a nonempty summary, every résumé bullet and every cover-letter paragraph |
+| checks | Required review checks listed below |
+| unresolved_findings | List of outstanding findings; must be empty for acceptance |
+
+Every claim contains generated `id`, `fact_ids` and `source_ids` fields plus `passed` and `notes`. Keep the generated identity and evidence references unchanged. After checking that claim's meaning, set `passed` to JSON `true` and write nonempty, specific evidence or reasons in `notes`. Personal statements and future plans still need a reason explaining their support and wording; they do not become factual evidence of past work.
+
+The `checks` object has exactly the required keys `source_fidelity`, `scope_and_qualifiers`, `pair_consistency`, `writing_quality` and `rendered_documents`. Each has `passed` and `notes`; every check must be true and have nonempty notes. Inspect dates, credentials, numbers, individual/team contribution, metric qualifiers, future versus past work, consistent prose, writing quality and rendered text/layout/links. Review both documents in every requested format. Resolve findings; never merely delete a finding or mark it passed without resolving its cause.
+
+`self-review DRAFT --report REPORT` validates report completeness and binds the review to the exact draft, saved preference and preview package. It writes a distinct `.self-review.json` receipt beside the draft. That receipt records AI self-review, not human approval. `render --final` in AI mode accepts a valid receipt and the same formats without requiring `approve`. Changes to the draft, sources, profile, preference or preview package require fresh review. Deterministic validation enforces report coverage and consistency; the assistant remains responsible for the semantic checks it attests to.
+
+Neither the preference nor a review receipt authorizes external sending or submission, factual invention, legal assent or sensitive-data sharing, or overrides the host assistant's rules.

@@ -20,6 +20,9 @@ vaults/
 ._*
 test-results/
 *.approval.json
+*.self-review.json
+*review-report*.json
+review-preference.json
 draft.json
 draft-*.json
 draft_*.json

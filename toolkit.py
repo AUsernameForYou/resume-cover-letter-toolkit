@@ -14,6 +14,7 @@ import sys
 import tempfile
 import career
 import documents
+import review
 
 PROJECT=Path(__file__).resolve().parent
 
@@ -49,7 +50,7 @@ def init(root,example=False):
     except (career.ValidationError,OSError,sqlite3.Error,ValueError) as exc:
         command='python3 toolkit.py --workspace '+shlex.quote(str(root))+' build'
         raise career.ValidationError('Workspace source files were created and preserved, but the database build failed: '+str(exc)+'. Resolve the cause, then run '+command+'. Do not delete your source files or repeat init.') from exc
-    return {'workspace':str(root),'example':example,'counts':built['counts'],'next':'Edit profile.json and add sourced facts, or run the fictional demo job.'}
+    return {'workspace':str(root),'example':example,'counts':built['counts'],'review_preference':review.status(root),'next':'An assisting agent first asks the review preference question and records your explicit choice with review-mode; then edit profile.json and add sourced facts, or run the fictional demo job.'}
 
 
 def capture_job(root,job_id,company,title,url,description):
@@ -81,7 +82,7 @@ def parser():
     sub=p.add_subparsers(dest='command',required=True)
     q=sub.add_parser('init',help='Create a separate private workspace')
     q.add_argument('directory',type=Path);q.add_argument('--example',action='store_true')
-    for command in ['build','validate','stats','search','show','match','export','validate-exports','add','capture-job','bundle','draft','refresh-draft','check-draft','approve','render','history','status']:
+    for command in ['build','validate','stats','search','show','match','export','validate-exports','add','capture-job','bundle','draft','refresh-draft','check-draft','approve','review-mode','review-checklist','self-review','render','history','status']:
         q=sub.add_parser(command)
         if command=='search':
             q.add_argument('query',nargs='+');q.add_argument('--include-context',action='store_true');q.add_argument('--include-unconfirmed',action='store_true');q.add_argument('--limit',type=int,default=20)
@@ -92,9 +93,12 @@ def parser():
         if command=='add':q.add_argument('pack',type=Path);q.add_argument('--name')
         if command=='capture-job':
             q.add_argument('job_id');q.add_argument('--company',required=True);q.add_argument('--title',required=True);q.add_argument('--url',required=True);q.add_argument('--description',type=Path,required=True)
-        if command in ['refresh-draft','check-draft','approve','render']:q.add_argument('draft',type=Path)
-        if command=='render':
-            q.add_argument('--format',action='append',choices=['html','docx','pdf']);q.add_argument('--final',action='store_true',help='Require an exact human-review receipt');q.add_argument('--soffice',type=Path)
+        if command=='review-mode':q.add_argument('mode',nargs='?',choices=sorted(review.MODES),help='Persist the explicit user choice for artifact review; omit to inspect onboarding status')
+        if command in ['refresh-draft','check-draft','approve','review-checklist','self-review','render']:q.add_argument('draft',type=Path)
+        if command in ['render','review-checklist']:
+            q.add_argument('--format',action='append',choices=['html','docx','pdf']);q.add_argument('--soffice',type=Path)
+        if command=='render':q.add_argument('--final',action='store_true',help='Require an exact review receipt for the workspace review mode; never submit externally')
+        if command=='self-review':q.add_argument('--report',type=Path,required=True);q.add_argument('--soffice',type=Path)
         if command=='status':q.add_argument('version');q.add_argument('status',choices=['applied','interview','closed','declined'])
     return p
 
@@ -106,18 +110,21 @@ def main(argv=None):
         else:
             if args.workspace is None:raise career.ValidationError('Pass --workspace PATH to your private workspace')
             root=args.workspace.resolve()
-            if args.command=='build':result=career.build(root)
+            if args.command=='review-mode':result=review.status(root,args.mode)
+            elif args.command=='build':result=career.build(root)
             elif args.command=='validate':
                 data,origins,packs=career.load_data(root);documents.profile(root);result={'valid':True,'profile_valid':True,'counts':career.data_counts(data),'packs':packs,'data_sha256':career.data_digest(data),'provenance_sha256':career.provenance_digest(origins)}
             elif args.command=='add':result=career.add_pack(root,args.pack.resolve(),args.name)
             elif args.command=='capture-job':result=capture_job(root,args.job_id,args.company,args.title,args.url,args.description.resolve())
             elif args.command=='bundle':
                 _,path=documents.bundle(root,args.job_id,args.fact);result={'bundle':str(path),'resume_prompt':str(path/'resume-prompt.txt'),'cover_letter_prompt':str(path/'cover-letter-prompt.txt')}
-            elif args.command=='draft':result={'draft':str(documents.initial_draft(root,args.job_id,args.fact)),'next':'Edit the paired draft yourself or with your chosen assistant; check, preview, then approve only after human review.'}
+            elif args.command=='draft':result={'draft':str(documents.initial_draft(root,args.job_id,args.fact)),'review_preference':review.status(root),'next':'Edit the paired draft yourself or with your chosen assistant; check and preview, then use manual approval or the AI self-review report according to review-mode.'}
             elif args.command=='refresh-draft':result=documents.refresh_draft(root,args.draft.resolve())
             elif args.command=='check-draft':
                 draft,_,_=documents.check_draft(root,args.draft.resolve());result={'valid':True,'semantic_review_required':True,'letter_date':draft['letter_date']}
             elif args.command=='approve':result={'approval':str(documents.approve(root,args.draft.resolve()))}
+            elif args.command=='review-checklist':result=documents.self_review_checklist(root,args.draft.resolve(),args.format or ['html'],args.soffice)
+            elif args.command=='self-review':result={'self_review':str(documents.self_review(root,args.draft.resolve(),args.report.resolve(),args.soffice)),'review_kind':'ai-self-review','external_submission_authorized':False}
             elif args.command=='render':result=documents.render(root,args.draft.resolve(),args.format or ['html'],args.final,args.soffice)
             elif args.command=='history':result=documents.history(root)
             elif args.command=='status':result=documents.history(root,args.status,args.version)
